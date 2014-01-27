@@ -84,7 +84,7 @@ type ('a, 'b) base = {
 
 type 'a foreign = {
   name: string;
-  typ: 'a typ;
+  ty: 'a typ;
   libraries: string list;
   packages: string list;
 }
@@ -105,15 +105,15 @@ let rec string_of_impl: type a. a impl -> string = function
   | App { f; x } -> Printf.sprintf "App (%s, %s)" (string_of_impl f) (string_of_impl x)
 
 type 'a folder = {
-  f: 'b. 'a -> 'b impl -> 'a
+  fn: 'b. 'a -> 'b impl -> 'a
 }
 
 let rec fold: type a. 'b folder -> a impl -> 'b -> 'b =
   fun fn t acc ->
     match t with
     | Impl _
-    | Foreign _  -> fn.f acc t
-    | App {f; x} -> fold fn f (fn.f acc x)
+    | Foreign _  -> fn.fn acc t
+    | App {f; x} -> fold fn f (fn.fn acc x)
 
 type iterator = {
   i: 'b. 'b impl -> unit
@@ -178,7 +178,7 @@ module Impl = struct
   and module_names: type a. a impl -> string list =
     function t ->
       let fn = {
-        f = fun acc t -> module_name t :: acc
+        fn = fun acc t -> module_name t :: acc
       } in
       fold fn t []
 
@@ -260,12 +260,12 @@ let implementation typ t m =
 let ($) f x =
   App { f; x }
 
-let foreign name ?(libraries=[]) ?(packages=[]) typ =
-  Foreign { name; typ; libraries; packages }
+let foreign name ?(libraries=[]) ?(packages=[]) ty =
+  Foreign { name; ty; libraries; packages }
 
 let rec typ: type a. a impl -> a typ = function
-  | Impl { typ }
-  | Foreign { typ } -> typ
+  | Impl { typ } -> typ
+  | Foreign { ty } -> ty
   | App { f }       -> match typ f with Function (_, b) -> b | _ -> assert false
 
 module Io_page = struct
@@ -280,11 +280,8 @@ module Io_page = struct
   let module_name () =
     "Io_page"
 
-  let packages () = [
-    match !mode with
-    | `Unix _ -> "io-page-unix"
-    | `Xen    -> "io-page-xen"
-  ]
+  let packages () =
+    [ "io-page" ]
 
   let libraries () =
     packages ()
@@ -301,7 +298,7 @@ type io_page = IO_PAGE
 
 let io_page = Type IO_PAGE
 
-let defaut_io_page: io_page impl =
+let default_io_page: io_page impl =
   impl io_page () (module Io_page)
 
 module Clock = struct
@@ -401,11 +398,11 @@ module Crunch = struct
   let libraries _ = [
     "mirage-types";
     "lwt";
-    "cstruct" ] @ [
+    "cstruct" ] @ (
       match !mode with
-      | `Unix _ -> "io-page-unix"
-      | `Xen    -> "io-page-xen"
-    ]
+      | `Unix _ -> [ "io-page.unix" ]
+      | `Xen    -> []
+    ) @ [ "io-page" ]
 
   let ml t =
     Printf.sprintf "%s.ml" (name t)
@@ -472,7 +469,7 @@ module Direct_kv_ro = struct
         "mirage-types";
         "lwt";
         "cstruct";
-        "io-page-unix";
+        "io-page.unix"; "io-page";
         "mirage-fs-unix";
       ]
 
@@ -1215,7 +1212,7 @@ let clean t =
  * [Mirage_config.register] in order to have an observable
  * side effect to this command. *)
 let compile_and_dynlink file =
-  info "%s" (blue_s (Printf.sprintf "Compiling and dynlinkg %s" file));
+  info "%s" (blue_s (Printf.sprintf "Compiling and dynlinking %s" file));
   let root = Filename.dirname file in
   let file = Filename.basename file in
   let file = Dynlink.adapt_filename file in
@@ -1235,7 +1232,7 @@ let scan_conf = function
   | None   ->
     let files = Array.to_list (Sys.readdir ".") in
     match List.filter ((=) "config.ml") files with
-    | [] -> error "No configuration file ending in .conf found.\n\
+    | [] -> error "No configuration file config.ml found.\n\
                    You'll need to create one to let Mirage know what do do."
     | [f] ->
       info "Using the scanned config file: %s" (yellow_s f);

@@ -1446,12 +1446,12 @@ let configure_main_xl t =
   append oc "# The disk configuration is defined here:";
   append oc "# http://xenbits.xen.org/docs/4.3-testing/misc/xl-disk-configuration.txt";
   append oc "# An example would look like:";
-  append oc "# disk = [ '/dev/loop0,,xvda' ]";
+  append oc "# disk = [ 'phy:/dev/loop0,xvda,w,' ]";
   newline oc;
   append oc "# The network configuration is defined here:";
   append oc "# http://xenbits.xen.org/docs/4.3-testing/misc/xl-network-configuration.html";
   append oc "# An example would look like:";
-  append oc "# vif = [ 'mac=c0:ff:ee:c0:ff:ee,bridge=br0' ]";
+  append oc "# vif = [ 'mac=c0:ff:ee:c0:ff:ee,bridge=xenbr0' ]";
   close_out oc
 
 let clean_main_xl t =

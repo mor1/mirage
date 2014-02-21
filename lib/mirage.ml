@@ -72,7 +72,7 @@ module type CONFIGURABLE = sig
   val libraries: t -> string list
   val configure: t -> unit
   val clean: t -> unit
-  val update_path: t -> string -> t
+  val resolve_path: t -> string -> t
 end
 
 
@@ -99,8 +99,8 @@ module TODO (N: sig val name: string end) = struct
   let clean _ =
     todo "clean"
 
-  let update_path _ =
-    todo "update_path"
+  let resolve_path _ =
+    todo "resolve_path"
 
 end
 
@@ -269,12 +269,12 @@ module Impl = struct
     | Foreign _                  -> ()
     | App { f; x }               -> clean f; clean x
 
-  let rec update_path: type a. a impl -> string -> a impl =
+  let rec resolve_path: type a. a impl -> string -> a impl =
     fun t root -> match t with
       | Impl b ->
-        let module M = (val b.m) in Impl { b with t = M.update_path b.t root }
+        let module M = (val b.m) in Impl { b with t = M.resolve_path b.t root }
       | Foreign _  -> t
-      | App { f; x } -> App { f = update_path f root; x = update_path x root }
+      | App { f; x } -> App { f = resolve_path f root; x = resolve_path x root }
 
 end
 
@@ -318,7 +318,7 @@ module Io_page = struct
 
   let clean () = ()
 
-  let update_path () _ = ()
+  let resolve_path () _ = ()
 
 end
 
@@ -353,7 +353,7 @@ module Clock = struct
 
   let clean () = ()
 
-  let update_path () _ = ()
+  let resolve_path () _ = ()
 
 end
 
@@ -390,7 +390,7 @@ module Console = struct
   let clean _ =
     ()
 
-  let update_path t _ =
+  let resolve_path t _ =
     t
 
 end
@@ -455,7 +455,7 @@ module Crunch = struct
     remove (ml t);
     remove (mli t)
 
-  let update_path t root =
+  let resolve_path t root =
     if Sys.file_exists (root / t) then
       root / t
     else
@@ -542,7 +542,7 @@ module Block = struct
   let clean t =
     ()
 
-  let update_path t root =
+  let resolve_path t root =
     if Sys.file_exists (root / t) then
       root / t
     else
@@ -592,8 +592,8 @@ module Fat = struct
   let clean t =
     Impl.clean t
 
-  let update_path t root =
-    Impl.update_path t root
+  let resolve_path t root =
+    Impl.resolve_path t root
 
 end
 
@@ -665,7 +665,6 @@ module Fat_of_files = struct
     append oc "${FAT} create ${IMG} ${SIZE}KiB";
     append oc "${FAT} add ${IMG} %s" t.regexp;
     append oc "echo Created '%s'" (block_file t);
-
     close_out oc;
     Unix.chmod file 0o755;
     command "./make-%s-image.sh" (name t)
@@ -674,7 +673,7 @@ module Fat_of_files = struct
     command "rm -f make-%s-image.sh %s" (name t) (block_file t);
     Impl.clean (block t)
 
-  let update_path t root =
+  let resolve_path t root =
     match t.dir with
     | None   -> t
     | Some d -> { t with dir = Some (root / d) }
@@ -721,7 +720,7 @@ module Network = struct
   let clean _ =
     ()
 
-  let update_path t _ =
+  let resolve_path t _ =
     t
 
 end
@@ -771,8 +770,8 @@ module Ethif = struct
   let clean t =
     Impl.clean t
 
-  let update_path t root =
-    Impl.update_path t root
+  let resolve_path t root =
+    Impl.resolve_path t root
 
 end
 
@@ -851,8 +850,8 @@ module IPV4 = struct
   let clean (eth, _) =
     Impl.clean eth
 
-  let update_path (eth, ip) root =
-    (Impl.update_path eth root, ip)
+  let resolve_path (eth, ip) root =
+    (Impl.resolve_path eth root, ip)
 
 end
 
@@ -906,8 +905,8 @@ module UDPV4_direct = struct
   let clean t =
     Impl.clean t
 
-  let update_path t root =
-    Impl.update_path t root
+  let resolve_path t root =
+    Impl.resolve_path t root
 
 end
 
@@ -940,7 +939,7 @@ module UDPV4_socket = struct
   let clean t =
     ()
 
-  let update_path t _ =
+  let resolve_path t _ =
     t
 
 end
@@ -986,8 +985,8 @@ module TCPV4_direct = struct
   let clean t =
     Impl.clean t
 
-  let update_path t root =
-    Impl.update_path t root
+  let resolve_path t root =
+    Impl.resolve_path t root
 
 end
 
@@ -1020,7 +1019,7 @@ module TCPV4_socket = struct
   let clean t =
     ()
 
-  let update_path t _ =
+  let resolve_path t _ =
     t
 
 end
@@ -1097,9 +1096,9 @@ module STACKV4_direct = struct
     Impl.clean c;
     Impl.clean e
 
-  let update_path (c, e, m) root =
-    Impl.update_path c root,
-    Impl.update_path e root,
+  let resolve_path (c, e, m) root =
+    Impl.resolve_path c root,
+    Impl.resolve_path e root,
     m
 
 end
@@ -1148,8 +1147,8 @@ module STACKV4_socket = struct
   let clean (c, _) =
     Impl.clean c
 
-  let update_path (c, ips) root =
-    (Impl.update_path c root, ips)
+  let resolve_path (c, ips) root =
+    (Impl.resolve_path c root, ips)
 
 end
 
@@ -1209,8 +1208,8 @@ module Channel_over_TCPV4 = struct
   let clean t =
     Impl.clean t
 
-  let update_path t root =
-    Impl.update_path t root
+  let resolve_path t root =
+    Impl.resolve_path t root
 
 end
 
@@ -1293,10 +1292,10 @@ module HTTP = struct
     | `Channel c    -> Impl.clean c
     | `Stack (_, s) -> Impl.clean s
 
-  let update_path t root =
+  let resolve_path t root =
     match t with
-    | `Channel c    -> `Channel (Impl.update_path c root)
-    | `Stack (p, s) -> `Stack (p, Impl.update_path s root)
+    | `Channel c    -> `Channel (Impl.resolve_path c root)
+    | `Stack (p, s) -> `Stack (p, Impl.resolve_path s root)
 
 end
 
@@ -1344,8 +1343,8 @@ module Job = struct
   let clean t =
     Impl.clean t.impl
 
-  let update_path t root =
-    { t with impl = Impl.update_path t.impl root }
+  let resolve_path t root =
+    { t with impl = Impl.resolve_path t.impl root }
 
 end
 
@@ -1366,8 +1365,8 @@ let reset () =
 let set_config_file f =
   config_file := Some f
 
-let update_path t root =
-  { t with jobs = List.map (fun j -> Impl.update_path j root) t.jobs }
+let resolve_path t root =
+  { t with jobs = List.map (fun j -> Impl.resolve_path j root) t.jobs }
 
 let register name jobs =
   let root = match !config_file with
@@ -1689,4 +1688,4 @@ let load file =
   compile_and_dynlink file;
   let t = registered () in
   set_section t.name;
-  update_path t root
+  resolve_path t root

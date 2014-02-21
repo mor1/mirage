@@ -57,6 +57,11 @@ let set_mode m =
 let get_mode () =
   !mode
 
+let device_map = ref (0, [])
+let node_of n =
+  let xvd_major = 202 in
+  string_of_int ((xvd_major lsl 8) + (16*n))
+
 type _ typ =
   | Type: 'a -> 'a typ
   | Function: 'a typ * 'b typ -> ('a -> 'b) typ
@@ -535,8 +540,15 @@ module Block = struct
   ]
 
   let configure t =
+    let n, m = !device_map in
+    let dev =
+      try List.assoc (name t) m with
+      | Not_found ->
+        device_map := (n+1, (t, n) :: m);
+        n
+    in
     append_main "let %s () =" (name t);
-    append_main "  %s.connect %S" (module_name t) t;
+    append_main "  %s.connect %S" (module_name t) (node_of n);
     newline_main ()
 
   let clean t =
@@ -667,7 +679,28 @@ module Fat_of_files = struct
     append oc "echo Created '%s'" (block_file t);
     close_out oc;
     Unix.chmod file 0o755;
-    command "./make-%s-image.sh" (name t)
+    command "./make-%s-image.sh" (name t);
+
+    match !mode with
+    | `Unix -> ()
+    | `Xen ->
+      let n =
+        let _, m = !device_map in
+        try List.assoc (block_file t) m with
+        | Not_found -> failwith (
+            Printf.sprintf "Unknown device! %S" (block_file t))
+      in
+      let file = Printf.sprintf "mount-%s-image.sh" (name t) in
+      let oc = open_out file in
+      append oc "#!/bin/sh";
+      append oc "";
+      append oc "echo \"Mount FAT image using 'losetup'.\"";
+      append oc "";
+      append oc "sudo losetup -d /dev/loop%d" n;
+      append oc "sudo losetup /dev/loop%d %S" n (block_file t);
+      close_out oc;
+      Unix.chmod file 0o755;
+      command "./mount-%s-image.sh" (name t)
 
   let clean t =
     command "rm -f make-%s-image.sh %s" (name t) (block_file t);

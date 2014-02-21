@@ -363,8 +363,8 @@ module type CONFIGURABLE = sig
   val clean: t -> unit
   (** Clean all the files generated to use the given device. *)
 
-  val update_path: t -> string -> t
-  (** [update_path t root] prefixes all the path appearing in [t] with
+  val resolve_path: t -> string -> t
+  (** [resolve_path t root] prefixes all the path appearing in [t] with
       the the prefix [root]. *)
 
 end

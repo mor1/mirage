@@ -1416,7 +1416,7 @@ let configure_myocamlbuild_ml t =
        --output-obj rules *)
     let file = t.root / "myocamlbuild.ml" in
     let oc = open_out file in
-    append oc "(* %s *)" generated_by_mirage;
+    append oc "(* %s *)" (generated_by_mirage ());
     newline oc;
     append oc
       "open Ocamlbuild_pack;;\n\
@@ -1452,7 +1452,7 @@ let clean_myocamlbuild_ml t =
 let configure_main_xl t =
   let file = t.root / t.name ^ ".xl" in
   let oc = open_out file in
-  append oc "# %s" generated_by_mirage;
+  append oc "# %s" (generated_by_mirage ());
   newline oc;
   append oc "name = '%s'" t.name;
   append oc "kernel = '%s/mir-%s.xen'" t.root t.name;
@@ -1483,7 +1483,7 @@ let configure_makefile t =
     | ls -> "-pkgs " ^ String.concat "," ls in
   let packages = String.concat " " (packages t) in
   let oc = open_out file in
-  append oc "# %s" generated_by_mirage;
+  append oc "# %s" (generated_by_mirage ());
   newline oc;
   append oc "LIBS   = %s" libraries;
   append oc "PKGS   = %s" packages;
@@ -1583,7 +1583,7 @@ let configure_job j =
 let configure_main t =
   info "Generating main.ml";
   set_main_ml (t.root / "main.ml");
-  append_main "(* %s *)" generated_by_mirage;
+  append_main "(* %s *)" (generated_by_mirage ());
   newline_main ();
   append_main "open Lwt";
   newline_main ();

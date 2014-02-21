@@ -19,7 +19,7 @@
 
 (** {2 Misc} *)
 
-val generated_by_mirage: string
+val generated_by_mirage: unit -> string
 (** The header string for every generated file. *)
 
 val ocaml_version: unit -> int * int

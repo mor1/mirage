@@ -258,7 +258,7 @@ let read_command fmt =
       | WEXITED r   ->
         error "command terminated with exit code %d\nstderr: %s" r (Buffer.contents buf2)) fmt
 
-let generated_by_mirage =
+let generated_by_mirage () =
   let t = Unix.gettimeofday () in
   let months = [| "Jan"; "Feb"; "Mar"; "Apr"; "May"; "Jun";
                   "Jul"; "Aug"; "Sep"; "Oct"; "Nov"; "Dec" |] in

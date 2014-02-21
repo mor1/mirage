@@ -649,12 +649,12 @@ module Fat_of_files = struct
     let oc = open_out file in
     append oc "#!/bin/sh";
     append oc "";
-    append oc "echo Build a FAT image using the 'fat' command-line tool";
+    append oc "echo \"Build a FAT image using the 'fat' command-line tool.\"";
     append oc "";
     append oc "FAT=$(which fat)";
     append oc "if [ ! -x \"${FAT}\" ]; then";
-    append oc "  echo I couldn\\'t find the 'fat' command-line tool.";
-    append oc "  echo Try running 'opam install fat-filesystem'";
+    append oc "  echo \"I couldn't find the 'fat' command-line tool.\"";
+    append oc "  echo \"Try running 'opam install fat-filesystem'\"";
     append oc "  exit 1";
     append oc "fi";
     append oc "";

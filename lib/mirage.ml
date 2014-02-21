@@ -606,7 +606,7 @@ type fs = FS
 let fs = Type FS
 
 let fat block =
-    impl fs block (module Fat)
+  impl fs block (module Fat)
 
 (* This would deserve to be in its own lib. *)
 let kv_ro_of_fs x =

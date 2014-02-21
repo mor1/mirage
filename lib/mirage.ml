@@ -130,7 +130,8 @@ and ('a, 'b) app = {
 let rec string_of_impl: type a. a impl -> string = function
   | Impl { t; m = (module M) } -> Printf.sprintf "Impl (%s)" (M.module_name t)
   | Foreign { name } -> Printf.sprintf "Foreign (%s)" name
-  | App { f; x } -> Printf.sprintf "App (%s, %s)" (string_of_impl f) (string_of_impl x)
+  | App { f; x } ->
+    Printf.sprintf "App (%s, %s)" (string_of_impl f) (string_of_impl x)
 
 type 'a folder = {
   fn: 'b. 'a -> 'b impl -> 'a
@@ -164,9 +165,7 @@ module Name = struct
   let names = Hashtbl.create 1024
 
   let create name =
-    let n =
-      try 1 + Hashtbl.find ids name
-      with Not_found -> 1 in
+    let n = try 1 + Hashtbl.find ids name with Not_found -> 1 in
     Hashtbl.replace ids name n;
     Printf.sprintf "%s%d" name n
 
@@ -195,7 +194,7 @@ module Impl = struct
   and module_name: type a. a impl -> string = function
     | Impl { t; m = (module M) } -> M.module_name t
     | Foreign { name }           -> name
-    | App { f; x }   ->
+    | App { f; x } ->
       let name = match module_names f @ [module_name x] with
         | []   -> assert false
         | [m]  -> m
@@ -226,7 +225,7 @@ module Impl = struct
         match t with
         | Impl { t; m = (module M) } -> M.configure t
         | Foreign _                  -> ()
-        | App {f; x} as  app         ->
+        | App {f; x} as app          ->
           configure_app f;
           configure_app x;
           iter { i=configure } app;
@@ -272,7 +271,7 @@ module Impl = struct
 
   let rec update_path: type a. a impl -> string -> a impl =
     fun t root -> match t with
-      | Impl b     ->
+      | Impl b ->
         let module M = (val b.m) in Impl { b with t = M.update_path b.t root }
       | Foreign _  -> t
       | App {f; x} -> App { f = update_path f root; x = update_path x root }
@@ -293,9 +292,9 @@ let foreign name ?(libraries=[]) ?(packages=[]) ty =
   Foreign { name; ty; libraries; packages }
 
 let rec typ: type a. a impl -> a typ = function
-  | Impl { typ } -> typ
+  | Impl { typ }   -> typ
   | Foreign { ty } -> ty
-  | App { f }       -> match typ f with Function (_, b) -> b | _ -> assert false
+  | App { f }      -> match typ f with Function (_, b) -> b | _ -> assert false
 
 module Io_page = struct
 
@@ -653,8 +652,7 @@ module Fat_of_files = struct
     let oc = open_out file in
     append oc "#!/bin/sh";
     append oc "";
-    append oc "echo This uses the 'fat' command-line tool to build a simple FAT";
-    append oc "echo filesystem image.";
+    append oc "echo Build a FAT image using the 'fat' command-line tool";
     append oc "";
     append oc "FAT=$(which fat)";
     append oc "if [ ! -x \"${FAT}\" ]; then";
@@ -762,7 +760,8 @@ module Ethif = struct
   let configure t =
     let name = name t in
     Impl.configure t;
-    append_main "module %s = Ethif.Make(%s)" (module_name t) (Impl.module_name t);
+    append_main "module %s = Ethif.Make(%s)"
+      (module_name t) (Impl.module_name t);
     newline_main ();
     append_main "let %s () =" name;
     append_main "   %s () >>= function" (Impl.name t);
@@ -825,7 +824,8 @@ module IPV4 = struct
     let name = name t in
     let mname = module_name t in
     Impl.configure eth;
-    append_main "module %s = Ipv4.Make(%s)" (module_name t) (Impl.module_name eth);
+    append_main "module %s = Ipv4.Make(%s)"
+      (module_name t) (Impl.module_name eth);
     newline_main ();
     append_main "let %s () =" name;
     append_main "   %s () >>= function" (Impl.name eth);
@@ -894,7 +894,8 @@ module UDPV4_direct = struct
   let configure t =
     let name = name t in
     Impl.configure t;
-    append_main "module %s = Udpv4.Make(%s)" (module_name t) (Impl.module_name t);
+    append_main "module %s = Udpv4.Make(%s)"
+      (module_name t) (Impl.module_name t);
     newline_main ();
     append_main "let %s () =" name;
     append_main "   %s () >>= function" (Impl.name t);
@@ -930,7 +931,8 @@ module UDPV4_socket = struct
     let ip = match t with
       | None    -> "None"
       | Some ip ->
-        Printf.sprintf "Some (Ipaddr.V4.of_string_exn %s)" (Ipaddr.V4.to_string ip)
+        Printf.sprintf "Some (Ipaddr.V4.of_string_exn %s)"
+          (Ipaddr.V4.to_string ip)
     in
     append_main " %s.connect %S" (module_name t) ip;
     newline_main ()
@@ -1009,7 +1011,8 @@ module TCPV4_socket = struct
     let ip = match t with
       | None    -> "None"
       | Some ip ->
-        Printf.sprintf "Some (Ipaddr.V4.of_string_exn %s)" (Ipaddr.V4.to_string ip)
+        Printf.sprintf "Some (Ipaddr.V4.of_string_exn %s)"
+          (Ipaddr.V4.to_string ip)
     in
     append_main "  %s.connect %S" (module_name t) ip;
     newline_main ()
@@ -1062,7 +1065,8 @@ module STACKV4_direct = struct
     append_main "  module I = Ipv4.Make(E)";
     append_main "  module U = Udpv4.Make(I)";
     append_main "  module T = Tcpv4.Flow.Make(I)(OS.Time)(Clock)(Random)";
-    append_main "  module S = Tcpip_stack_direct.Make(%s)(OS.Time)(Random)(%s)(E)(I)(U)(T)"
+    append_main "  module S =\
+                 Tcpip_stack_direct.Make(%s)(OS.Time)(Random)(%s)(E)(I)(U)(T)"
       (Impl.module_name c) (Impl.module_name n);
 
     append_main "  include S";
@@ -1070,10 +1074,12 @@ module STACKV4_direct = struct
     newline_main ();
     append_main "let %s () =" name;
     append_main "  %s () >>= function" (Impl.name c);
-    append_main "  | `Error _    -> %s" (driver_initialisation_error (Impl.name c));
+    append_main "  | `Error _    -> %s"
+      (driver_initialisation_error (Impl.name c));
     append_main "  | `Ok console ->";
     append_main "  %s () >>= function" (Impl.name n);
-    append_main "  | `Error _      -> %s" (driver_initialisation_error (Impl.name n));
+    append_main "  | `Error _      -> %s"
+      (driver_initialisation_error (Impl.name n));
     append_main "  | `Ok interface ->";
     append_main "  let config = {";
     append_main "    V1_LWT.name = %S;" name;
@@ -1127,7 +1133,8 @@ module STACKV4_socket = struct
     newline_main ();
     append_main "let %s () =" name;
     append_main "  %s () >>= function" (Impl.name c);
-    append_main "  | `Error _    -> %s" (driver_initialisation_error (Impl.name c));
+    append_main "  | `Error _    -> %s"
+      (driver_initialisation_error (Impl.name c));
     append_main "  | `Ok console ->";
     append_main "  let config = {";
     append_main "    V1_LWT.name = %S;" name;
@@ -1151,16 +1158,20 @@ type stackv4 = STACK4
 let stackv4 = Type STACK4
 
 let direct_stackv4_with_dhcp console network =
-  impl stackv4 (console, network, `DHCP) (module STACKV4_direct)
+  impl stackv4 (console, network, `DHCP)
+    (module STACKV4_direct)
 
 let direct_stackv4_with_default_ipv4 console network =
-  impl stackv4 (console, network, `IPV4 default_ipv4_conf) (module STACKV4_direct)
+  impl stackv4 (console, network, `IPV4 default_ipv4_conf)
+    (module STACKV4_direct)
 
 let direct_stackv4_with_static_ipv4 console network ipv4 =
-  impl stackv4 (console, network, `IPV4 ipv4) (module STACKV4_direct)
+  impl stackv4 (console, network, `IPV4 ipv4)
+    (module STACKV4_direct)
 
 let socket_stackv4 console ips =
-  impl stackv4 (console, ips) (module STACKV4_socket)
+  impl stackv4 (console, ips)
+    (module STACKV4_socket)
 
 
 module Channel_over_TCPV4 = struct
@@ -1182,11 +1193,13 @@ module Channel_over_TCPV4 = struct
 
   let configure t =
     Impl.configure t;
-    append_main "module %s = Channel.Make(%s)" (module_name t) (Impl.module_name t);
+    append_main "module %s = Channel.Make(%s)"
+      (module_name t) (Impl.module_name t);
     newline_main ();
     append_main "let %s () =" (name t);
     append_main "  %s () >>= function" (Impl.name t);
-    append_main "  | `Error _    -> %s" (driver_initialisation_error (Impl.name t));
+    append_main "  | `Error _    -> %s"
+      (driver_initialisation_error (Impl.name t));
     append_main "  | `Ok console ->";
     append_main "  let flow = %s.create config in" (module_name t);
     append_main "  return (`Ok flow)";
@@ -1242,12 +1255,14 @@ module HTTP = struct
     begin match t with
       | `Channel c ->
         Impl.configure c;
-        append_main "module %s = HTTP.Make(%s)" (module_name_core t) (Impl.module_name c)
+        append_main "module %s = HTTP.Make(%s)"
+          (module_name_core t) (Impl.module_name c)
       | `Stack (_, s) ->
         Impl.configure s;
         append_main "module %s_channel = Channel.Make(%s.TCPV4)"
           (module_name_core t) (Impl.module_name s);
-        append_main "module %s = HTTP.Make(%s_channel)" (module_name_core t) (module_name_core t)
+        append_main "module %s = HTTP.Make(%s_channel)"
+          (module_name_core t) (module_name_core t)
     end;
     newline_main ();
     let subname = match t with
@@ -1261,9 +1276,12 @@ module HTTP = struct
       | `Channel c   -> failwith "TODO"
       | `Stack (p,s) ->
         append_main "  let listen spec =";
-        append_main "    %s.listen_tcpv4 ~port:%d stack (fun flow ->" (Impl.module_name s) p;
-        append_main "      let chan = %s_channel.create flow in" (module_name_core t);
-        append_main "      %s.Server_core.callback spec chan chan" (module_name_core t);
+        append_main "    %s.listen_tcpv4 ~port:%d stack (fun flow ->"
+          (Impl.module_name s) p;
+        append_main "      let chan = %s_channel.create flow in"
+          (module_name_core t);
+        append_main "      %s.Server_core.callback spec chan chan"
+          (module_name_core t);
         append_main "    );";
         append_main "    %s.listen stack in" (Impl.module_name s);
         append_main "  return (`Ok listen)";
@@ -1508,8 +1526,10 @@ let configure_makefile t =
   append oc "run: build";
   begin match !mode with
     | `Xen ->
-      append oc "\t@echo %s.xl has been created. Edit it to add VIFs or VBDs" t.name;
-      append oc "\t@echo Then do something similar to: xl create -c %s.xl" t.name
+      append oc "\t@echo %s.xl has been created. Edit it to add VIFs or VBDs"
+        t.name;
+      append oc "\t@echo Then do something similar to: xl create -c %s.xl"
+        t.name
     | `Unix ->
       append oc "\t$(SUDO) ./mir-%s" t.name
   end;
@@ -1569,7 +1589,9 @@ let configure_main t =
   newline_main ();
   List.iter (fun j -> Impl.configure j) t.jobs;
   List.iter configure_job t.jobs;
-  let names = List.map (fun j -> Printf.sprintf "%s ()" (Impl.name j)) t.jobs in
+  let names =
+    List.map (fun j -> Printf.sprintf "%s ()" (Impl.name j)) t.jobs
+  in
   append_main "let () =";
   append_main "  OS.Main.run (join [%s])" (String.concat "; " names)
 
@@ -1632,8 +1654,11 @@ let compile_and_dynlink file =
   let file = Dynlink.adapt_filename file in
   command "rm -rf %s/_build/%s.*" root (Filename.chop_extension file);
   command "cd %s && ocamlbuild -use-ocamlfind -tags annot,bin_annot -pkg mirage %s" root file;
-  try Dynlink.loadfile (String.concat "/" [root; "_build"; file])
-  with Dynlink.Error err -> error "Error loading config: %s" (Dynlink.error_message err)
+  try
+    Dynlink.loadfile (String.concat "/" [root; "_build"; file])
+  with
+  | Dynlink.Error err ->
+    error "Error loading config: %s" (Dynlink.error_message err)
 
 (* If a configuration file is specified, then use that.
  * If not, then scan the curdir for a `config.ml` file.

@@ -424,7 +424,8 @@ module STACKV4_socket: CONFIGURABLE with
 
 module Channel_over_TCPV4: CONFIGURABLE with type t = tcpv4 impl
 
-module HTTP: CONFIGURABLE with type t = [`Channel of channel impl | `Stack of int * stackv4 impl]
+module HTTP: CONFIGURABLE
+  with type t = [`Channel of channel impl | `Stack of int * stackv4 impl]
 
 module Job: CONFIGURABLE
 

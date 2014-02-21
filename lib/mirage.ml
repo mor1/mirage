@@ -211,9 +211,9 @@ module Impl = struct
 
   let rec names: type a. a impl -> string list = function
     | Foreign _
-    | Impl _ as t          -> [name t]
-    | App {f=Foreign f; x} -> names x
-    | App {f; x}           -> (names f) @ [name x]
+    | Impl _ as t            -> [name t]
+    | App { f=Foreign f; x } -> names x
+    | App { f; x }           -> (names f) @ [name x]
 
   let configured = Hashtbl.create 31
 
@@ -257,17 +257,17 @@ module Impl = struct
   let rec packages: type a. a impl -> string list = function
     | Impl { t; m = (module M) } -> M.packages t
     | Foreign { packages }       -> packages
-    | App {f; x}                 -> packages f @ packages x
+    | App { f; x }               -> packages f @ packages x
 
   let rec libraries: type a. a impl -> string list = function
     | Impl { t; m = (module M) } -> M.libraries t
     | Foreign { libraries }      -> libraries
-    | App {f; x}                 -> libraries f @ libraries x
+    | App { f; x }               -> libraries f @ libraries x
 
   let rec clean: type a. a impl -> unit = function
     | Impl { t; m = (module M) } -> M.clean t
     | Foreign _                  -> ()
-    | App {f; x}                 -> clean f; clean x
+    | App { f; x }               -> clean f; clean x
 
   let rec update_path: type a. a impl -> string -> a impl =
     fun t root -> match t with

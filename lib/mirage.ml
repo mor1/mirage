@@ -274,7 +274,7 @@ module Impl = struct
       | Impl b ->
         let module M = (val b.m) in Impl { b with t = M.update_path b.t root }
       | Foreign _  -> t
-      | App {f; x} -> App { f = update_path f root; x = update_path x root }
+      | App { f; x } -> App { f = update_path f root; x = update_path x root }
 
 end
 
@@ -567,23 +567,20 @@ module Fat = struct
   let module_name t =
     String.capitalize (name t)
 
-  let packages t = [
-    "fat-filesystem";
-  ]
+  let packages t =
+    ["fat-filesystem"]
     @ Io_page.packages ()
     @ Block.packages t
 
-  let libraries t = [
-    "fat-filesystem";
-  ]
+  let libraries t =
+    ["fat-filesystem"]
     @ Io_page.libraries ()
     @ Block.libraries t
 
   let configure t =
     Impl.configure t;
     append_main "module %s = Fat.Fs.Make(%s)(Io_page)"
-      (module_name t)
-      (Impl.module_name t);
+      (module_name t) (Impl.module_name t);
     newline_main ();
     let name = name t in
     append_main "let %s () =" name;
@@ -706,9 +703,10 @@ module Network = struct
     "Netif"
 
   let packages t =
-    match !mode with
-    | `Unix -> ["mirage-net-unix"]
-    | `Xen  -> ["mirage-net-xen"]
+    [ match !mode with
+      | `Unix -> "mirage-net-unix"
+      | `Xen  -> "mirage-net-xen"
+    ]
 
   let libraries t =
     packages t
@@ -753,9 +751,10 @@ module Ethif = struct
 
   let libraries t =
     Impl.libraries t @
-    match !mode with
-    | `Unix -> [ "tcpip.ethif-unix" ]
-    | `Xen  -> [ "tcpip.ethif" ]
+    [ match !mode with
+      | `Unix -> "tcpip.ethif-unix"
+      | `Xen  -> "tcpip.ethif"
+    ]
 
   let configure t =
     let name = name t in
@@ -816,9 +815,10 @@ module IPV4 = struct
 
   let libraries (t, _) =
     Impl.libraries t @
-    match !mode with
-    | `Unix -> [ "tcpip.ipv4-unix" ]
-    | `Xen  -> [ "tcpip.ipv4" ]
+    [ match !mode with
+      | `Unix -> "tcpip.ipv4-unix"
+      | `Xen  -> "tcpip.ipv4"
+    ]
 
   let configure (eth, ip as t) =
     let name = name t in
@@ -940,7 +940,7 @@ module UDPV4_socket = struct
   let clean t =
     ()
 
-  let update_path t root =
+  let update_path t _ =
     t
 
 end
@@ -1020,7 +1020,7 @@ module TCPV4_socket = struct
   let clean t =
     ()
 
-  let update_path t root =
+  let update_path t _ =
     t
 
 end
@@ -1043,7 +1043,8 @@ module STACKV4_direct = struct
     let key = "stackv4" ^ Impl.name c ^ Impl.name n ^
               match m with
               | `DHCP   -> "dhcp"
-              | `IPV4 i -> meta_ipv4_config i in
+              | `IPV4 i -> meta_ipv4_config i
+    in
     Name.of_key key ~base:"stackv4"
 
   let module_name t =

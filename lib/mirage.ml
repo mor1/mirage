@@ -644,6 +644,12 @@ module Fat_of_files = struct
 
   let block t =
     block_of_file (block_file t)
+(*
+XXX
+need to get the filename under unix to be the node_of value and
+then thread into shell scripts below
+XXX
+*)
 
   let packages t =
     Fat.packages (block t)

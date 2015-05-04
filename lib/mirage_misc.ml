@@ -209,11 +209,18 @@ let command ?(redirect=true) fmt =
   Printf.kprintf (fun cmd ->
       info "%s %s" (yellow_s "=>") cmd;
       let redirect fn =
-        if redirect then
-          with_redirect stdout "log" (fun () ->
+        if redirect then (
+          let status =
+            with_redirect stdout "log" (fun () ->
               with_redirect stderr "log" fn
-            )
-        else (
+            ) in
+          if status <> 0 then (
+            let ic = open_in "log" in
+            try while true do error_msg !section "%s" (input_line ic) done;
+            with End_of_file -> ()
+          );
+          status
+        ) else (
           flush stdout;
           flush stderr;
           fn ()
@@ -221,21 +228,17 @@ let command ?(redirect=true) fmt =
       match redirect (fun () -> Sys.command cmd) with
       | 0 -> ()
       | i ->
-        let ic = open_in "log" in
-        begin
-          try while true do error_msg !section "%s" (input_line ic) done
-          with End_of_file -> ()
-        end;
         error "The command %S exited with code %d." cmd i;
     ) fmt
 
-let opam cmd ?switch deps =
+let opam cmd ?(yes=true) ?switch deps =
   let deps_str = String.concat " " deps in
   (* Note: we don't redirect output to the log as installation can take a long time
    * and the user will want to see what is happening. *)
+  let yes = if yes then "--yes " else "" in
   match switch with
-  | None     -> command ~redirect:false "opam %s --yes %s" cmd deps_str
-  | Some cmp -> command ~redirect:false "opam %s --yes %s --switch=%s" cmd deps_str cmp
+  | None     -> command ~redirect:false "opam %s %s%s" cmd yes deps_str
+  | Some cmp -> command ~redirect:false "opam %s %s%s --switch=%s" cmd yes deps_str cmp
 
 let in_dir dir f =
   let pwd = Sys.getcwd () in
@@ -254,6 +257,7 @@ let collect_output cmd =
 
 let uname_s () = collect_output "uname -s"
 let uname_m () = collect_output "uname -m"
+let uname_r () = collect_output "uname -r"
 
 let command_exists s =
   Sys.command ("which " ^ s ^ " > /dev/null") = 0

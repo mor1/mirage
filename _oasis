@@ -1,10 +1,10 @@
-OASISFormat: 0.3
+OASISFormat: 0.4
 Name:        mirage
-Version:     1.2.0
+Version:     2.4.0
 Synopsis:    Mirage configuration tool
-Authors:     Thomas Gazagnaire, Anil Madhavapeddy
+Authors:     Thomas Gazagnaire, Anil Madhavapeddy, Dave Scott, Thomas Leonard
 License:     ISC
-Plugins:     META (0.3)
+Plugins:     META (0.4)
 BuildTools:  ocamlbuild
 
 Library mirage
@@ -14,9 +14,22 @@ Library mirage
   Modules:            Mirage, Mirage_misc
   BuildDepends:       ipaddr,unix,dynlink,lwt,mirage-types,mirage-types.lwt
 
+Library "mirage-runtime"
+  Path:               lib
+  Findlibname:        runtime
+  Modules:            Mirage_runtime
+  Findlibparent:      mirage
+
 Executable mirage
   CompiledObject:     best
   Path:               lib
   MainIs:             main.ml
   Install:            true
   BuildDepends:       mirage,cmdliner
+
+Document "mirage"
+  Title:                Mirage docs
+  Type:                 OCamlbuild (0.4)
+  BuildTools+:          ocamldoc
+  XOCamlbuildPath:      lib
+  XOCamlbuildLibraries: mirage

@@ -1,8 +1,96 @@
-Trunk:
+2.4.0:
+* Support `mirage-http.2.2.0`
+* Support `conduit.0.8.0`
+* Support `tcpip.2.4.0`
+* Add time and clock parameters to IPv4 (#362, patch from @yomimono)
+* Support for `ocaml-tls` 0.4.0.
+* Conduit now takes an optional TLS argument, allowing servers to support
+  encryption. (#347)
+* Add the ability to specify `Makefile.user` to extend the generated
+  `Makefile`. Also `all`, `build` and `clean` are now extensible make
+  targets.
+* Remove the `mirage run` command (#379)
+* Call `opam depext` when configuring (#373)
+* Add opam files for `mirage` and `mirage-types` packages
+* Fix `mirage --version` (#374)
+* Add a `update-doc` target to the Makefile to easily update the online
+  documentation at http://mirage.github.io/mirage/
+
+2.3.0 (2015-03-10):
+* Remove the `IO_PAGE` module type from `V1`. This has now moved into the
+  `io-page` pacakge (#356)
+* Remove `DEVICE.connect` from the `V1` module types.  When a module is
+  functorised over a `DEVICE` it should only have the ability to
+  *use* devices it is given, not to connect to new ones. (#150)
+* Add `FLOW.error_message` to the `V1` module types to allow for
+  generic handling of errors. (#346)
+* Add `IP.uipaddr` as a universal IP address type. (#361)
+* Support the `entropy` version 0.2+ interfaces. (#359)
+* Check that the `opam` command is at least version 1.2.0 (#355)
+* Don't put '-classic-display' in the generated Makefiles. (#364)
+
+2.2.1 (2015-01-29):
+* Fix logging errors when `mirage` output is not redirected. (#355)
+* Do not reverse the order of C libraries when linking.  This fixes Zarith
+  linking in Xen mode. (#341).
+* Fix typos in command line help. (#352).
+
+2.2.0 (2014-12-18):
+* Add IPv6 support. This alters some of the interfaces that were previously
+  hardcoded to IPv4 by generalising them.  For example:
+
+```
+type v4
+type v6
+
+type 'a ip
+type ipv4 = v4 ip
+type ipv6 = v6 ip
+```
+
+Full support for configuring IPv6 does not exist yet, as this release is
+intended for getting the type definitions in place before adding configuration
+support.
+
+2.1.1 (2014-12-10):
+* Do not reuse the Unix linker options when building Xen unikernels.  Instead,
+  get the linker options from the ocamlfind `xen_linkopts` variables (#332).
+  See `tcpip.2.1.0` for a library that does this for a C binding.
+* Only activate MacOS X compilation by default on 10.10 (Yosemite) or higher.
+  Older revisions of MacOS X will use the generic Unix mode by default, since
+  the `vmnet` framework requires Yosemite or higher.
+* Do not run crunched filesystem modules through `camlp4`, which significantly
+  speeds up compilation on ARM platforms (from minutes to seconds!) (#299).
+
+2.1.0 (2014-12-07):
+* Add specific support for `MacOSX` as a platform, which enables network bridging
+  on Yosemite (#329).  The `--unix` flag will automatically activate the new target
+  if run on a MacOS X host.  If this breaks for you due to being on an older version of
+  MacOS X, then use the new `--target` flag to set either Unix, MacOSX or Xen to the
+  `mirage configure` command.
+* Add `mirage.runtime` findlib library and corresponding Mirage_runtime module (#327).
+* If net driver in STACKV4_direct can't initialize, print a helpful error (#164).
+* [xen]: fixed link order in generated Makefile (#322).
+* Make `Lwt.tracing` instructions work for Fish shell too by improving quoting (#328).
+
+2.0.1 (2014-11-21):
+* Add `register ~tracing` to enable tracing with mirage-profile at start-up (#321).
+* Update Dockerfile for latest libraries (#320).
+* Only build mirage-types if Io_page is also installed (#324).
+
+2.0.0 (2014-11-05):
+* [types]: backwards incompatible change: CONSOLE is now a FLOW;
+  'write' has a different signature and 'write_all' has been removed.
 * Set on_crash = 'preserve' in default Xen config.
 * Automatically install dependencies again, but display the live output to the
   user.
 * Include C stub libraries in linker command when generating Makefiles for Xen.
+* Add `Vchan`, `Conduit` and `Resolver` code generators.
+* Generate a `*.xe` script which can upload a kernel to a XenServer.
+* Generate a libvirt `*.xml` configuration file (#292).
+* Fix determination of `mirage-xen` location for paths with spaces (#279).
+* Correctly show config file locations when using a custom one.
+* Fix generation of foreign (non-functor) modules (#293)
 
 1.2.0 (2014-07-05):
 

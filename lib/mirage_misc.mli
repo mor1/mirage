@@ -61,12 +61,13 @@ val remove: string -> unit
 
 val realpath: string -> string
 
-val opam: string -> ?switch:string -> string list -> unit
+val opam: string -> ?yes:bool -> ?switch:string -> string list -> unit
 
 val in_dir: string -> (unit -> 'a) -> 'a
 
 val uname_s: unit -> string option
 val uname_m: unit -> string option
+val uname_r: unit -> string option
 
 (** {2 Display} *)
 

@@ -37,27 +37,56 @@ module type ETHIF = ETHIF
   with type 'a io = 'a Lwt.t
    and type buffer = Cstruct.t
    and type macaddr = Macaddr.t
-   and type ipv4addr = Ipaddr.V4.t
+
+(** IP stack *)
+module type IP = IP
+  with type 'a io = 'a Lwt.t
+   and type buffer = Cstruct.t
+   and type uipaddr = Ipaddr.t
 
 (** IPv4 stack *)
 module type IPV4 = IPV4
   with type 'a io = 'a Lwt.t
    and type buffer = Cstruct.t
-   and type ipv4addr = Ipaddr.V4.t
+   and type ipaddr = Ipaddr.V4.t
+   and type prefix = Ipaddr.V4.t (* FIXME: Use Ipaddr.V4.Prefix.t *)
+   and type uipaddr = Ipaddr.t
 
-(** UDPv4 stack *)
-module type UDPV4 = UDPV4
+(** IPv6 stack *)
+module type IPV6 = IPV6
   with type 'a io = 'a Lwt.t
    and type buffer = Cstruct.t
-   and type ipv4addr = Ipaddr.V4.t
+   and type ipaddr = Ipaddr.V6.t
+   and type prefix = Ipaddr.V6.Prefix.t
+   and type uipaddr = Ipaddr.t
 
-(** TCPv4 stack *)
-module type TCPV4 = TCPV4
+(** UDP stack *)
+module type UDP = UDP
   with type 'a io = 'a Lwt.t
    and type buffer = Cstruct.t
-   and type ipv4addr = Ipaddr.V4.t
 
-(** Buffered TCPv4 channel *)
+(** UDP stack over IPv4 *)
+module type UDPV4 = UDP
+  with type ipaddr = Ipaddr.V4.t
+
+(** UDP stack over IPv6 *)
+module type UDPV6 = UDP
+  with type ipaddr = Ipaddr.V6.t
+
+(** TCP stack *)
+module type TCP = TCP
+  with type 'a io = 'a Lwt.t
+   and type buffer = Cstruct.t
+
+(** TCP stack over IPv4 *)
+module type TCPV4 = TCP
+  with type ipaddr = Ipaddr.V4.t
+
+(** TCP stack over IPv6 *)
+module type TCPV6 = TCP
+  with type ipaddr = Ipaddr.V6.t
+
+(** Buffered TCP channel *)
 module type CHANNEL = CHANNEL
   with type 'a io = 'a Lwt.t
    and type 'a io_stream = 'a Lwt_stream.t
@@ -71,6 +100,7 @@ module type KV_RO = KV_RO
 (** Consoles *)
 module type CONSOLE = CONSOLE
   with type 'a io = 'a Lwt.t
+   and type buffer = Cstruct.t
 
 (** Entropy *)
 module type ENTROPY = ENTROPY

@@ -47,9 +47,16 @@ let set_main_ml file =
 type mode = [
   | `Unix
   | `Xen
+  | `MacOSX
 ]
 
-let mode = ref `Unix
+let string_of_mode =
+  function
+  | `Unix -> "Unix"
+  | `Xen -> "Xen"
+  | `MacOSX -> "MacOS X"
+
+let mode : mode ref = ref `Unix
 
 let set_mode m =
   mode := m
@@ -211,7 +218,7 @@ module Impl = struct
       fold fn t []
 
   let rec names: type a. a impl -> string list = function
-    | Foreign _
+    | Foreign _            -> []
     | Impl _ as t          -> [name t]
     | App {f=Foreign f; x} -> names x
     | App {f; x}           -> (names f) @ [name x]
@@ -317,7 +324,7 @@ module Io_page = struct
   let libraries () =
     match !mode with
     | `Xen  -> ["io-page"]
-    | `Unix -> ["io-page"; "io-page.unix"]
+    | `Unix | `MacOSX -> ["io-page"; "io-page.unix"]
 
   let configure () = ()
 
@@ -379,13 +386,15 @@ module Clock = struct
 
   let packages () = [
     match !mode with
-    | `Unix -> "mirage-clock-unix"
+    | `Unix | `MacOSX -> "mirage-clock-unix"
     | `Xen  -> "mirage-clock-xen"
   ]
 
   let libraries () = packages ()
 
-  let configure () = ()
+  let configure () =
+    append_main "let clock () = return (`Ok ())";
+    newline_main ()
 
   let clean () = ()
 
@@ -414,7 +423,9 @@ module Random = struct
 
   let libraries () = []
 
-  let configure () = ()
+  let configure () =
+    append_main "let random () = return (`Ok ())";
+    newline_main ()
 
   let clean () = ()
 
@@ -440,12 +451,19 @@ module Entropy = struct
 
   let construction () =
     match !mode with
-    | `Unix -> "Entropy_unix.Make (OS.Time)"
-    | `Xen  -> "Entropy_xen"
+    | `Unix | `MacOSX -> "Entropy_unix"
+    | `Xen  -> "Entropy_xen.Make(OS.Time)"
+
+  let id t =
+    match !mode with
+    (* default on Unix is the system entropy source *)
+    | (`Unix | `MacOSX) -> "()"
+    | `Xen -> "`From_host"
 
   let packages () =
+    [ "nocrypto" ] @
     match !mode with
-    | `Unix -> [ "mirage-entropy-unix" ]
+    | `Unix | `MacOSX -> [ "mirage-entropy-unix" ]
     | `Xen  -> [ "mirage-entropy-xen" ]
 
   let libraries = packages
@@ -454,7 +472,11 @@ module Entropy = struct
     append_main "module %s = %s" (module_name t) (construction t) ;
     newline_main () ;
     append_main "let %s () =" (name t);
-    append_main "  %s.connect ()" (module_name t);
+    append_main "  %s.connect %s >>= function" (module_name t) (id t);
+    append_main "  | `Error e -> %s" (driver_initialisation_error "entropy");
+    append_main "  | `Ok entropy ->";
+    append_main "  %s.handler entropy Nocrypto.Rng.Accumulator.add_rr >>= fun () ->" (module_name t);
+    append_main "  return (`Ok entropy)";
     newline_main ()
 
   let clean () = ()
@@ -467,6 +489,7 @@ type entropy = ENTROPY
 
 let entropy = Type ENTROPY
 
+(* The default is to get real entropy from the host *)
 let default_entropy: entropy impl =
   impl entropy () (module Entropy)
 
@@ -480,15 +503,24 @@ module Console = struct
   let module_name t =
     "Console"
 
-  let packages _ = [
+  let construction () =
     match !mode with
-    | `Unix -> "mirage-console-unix"
-    | `Xen  -> "mirage-console-xen"
-  ]
+    | `Unix | `MacOSX -> "Console_unix"
+    | `Xen  -> "Console_xen"
 
-  let libraries t = packages t
+  let packages _ =
+    match !mode with
+    | `Unix | `MacOSX -> ["mirage-console"; "mirage-unix"]
+    | `Xen  -> ["mirage-console"; "xenstore"; "mirage-xen"; "xen-gnt"; "xen-evtchn"]
+
+  let libraries _ =
+    match !mode with
+    | `Unix | `MacOSX -> ["mirage-console.unix"]
+    | `Xen -> ["mirage-console.xen"]
 
   let configure t =
+    append_main "module %s = %s" (module_name t) (construction ());
+    newline_main ();
     append_main "let %s () =" (name t);
     append_main "  %s.connect %S" (module_name t) t;
     newline_main ()
@@ -580,22 +612,22 @@ module Direct_kv_ro = struct
   let module_name t =
     match !mode with
     | `Xen  -> Crunch.module_name t
-    | `Unix -> "Kvro_fs_unix"
+    | `Unix | `MacOSX -> "Kvro_fs_unix"
 
   let packages t =
     match !mode with
     | `Xen  -> Crunch.packages t
-    | `Unix -> "mirage-fs-unix" :: Crunch.packages t
+    | `Unix | `MacOSX -> "mirage-fs-unix" :: Crunch.packages t
 
   let libraries t =
     match !mode with
     | `Xen  -> Crunch.libraries t
-    | `Unix -> "mirage-fs-unix" :: Crunch.libraries t
+    | `Unix | `MacOSX -> "mirage-fs-unix" :: Crunch.libraries t
 
   let configure t =
     match !mode with
     | `Xen  -> Crunch.configure t
-    | `Unix ->
+    | `Unix | `MacOSX ->
       append_main "let %s () =" (name t);
       append_main "  Kvro_fs_unix.connect %S" t
 
@@ -616,13 +648,13 @@ module Block = struct
 
   let packages _ = [
     match !mode with
-    | `Unix -> "mirage-block-unix"
+    | `Unix | `MacOSX -> "mirage-block-unix"
     | `Xen  -> "mirage-block-xen"
   ]
 
   let libraries _ = [
     match !mode with
-    | `Unix -> "mirage-block-unix"
+    | `Unix | `MacOSX -> "mirage-block-unix"
     | `Xen  -> "mirage-block-xen.front"
   ]
 
@@ -809,6 +841,7 @@ module Network = struct
   let packages t =
     match !mode with
     | `Unix -> ["mirage-net-unix"]
+    | `MacOSX -> ["mirage-net-macosx"]
     | `Xen  -> ["mirage-net-xen"]
 
   let libraries t =
@@ -855,7 +888,7 @@ module Ethif = struct
   let libraries t =
     Impl.libraries t @
     match !mode with
-    | `Unix -> [ "tcpip.ethif-unix" ]
+    | `Unix | `MacOSX -> [ "tcpip.ethif-unix" ]
     | `Xen  -> [ "tcpip.ethif" ]
 
   let configure t =
@@ -884,11 +917,13 @@ let ethernet = Type ETHERNET
 let etif network =
   impl ethernet network (module Ethif)
 
-type ipv4_config = {
-  address: Ipaddr.V4.t;
-  netmask: Ipaddr.V4.t;
-  gateways: Ipaddr.V4.t list;
+type ('ipaddr, 'prefix) ip_config = {
+  address: 'ipaddr;
+  netmask: 'prefix;
+  gateways: 'ipaddr list;
 }
+
+type ipv4_config = (Ipaddr.V4.t, Ipaddr.V4.t) ip_config
 
 let meta_ipv4_config t =
   Printf.sprintf "(Ipaddr.V4.of_string_exn %S, Ipaddr.V4.of_string_exn %S, [%s])"
@@ -902,6 +937,8 @@ module IPV4 = struct
 
   type t = {
     ethernet: ethernet impl;
+    clock: clock impl;
+    time: time impl;
     config  : ipv4_config;
   }
   (* XXX: should the type if ipv4.id be ipv4.t ?
@@ -915,11 +952,11 @@ module IPV4 = struct
     String.capitalize (name t)
 
   let packages t =
-    "tcpip" :: Impl.packages t.ethernet
+    "tcpip" :: Impl.packages t.time @ Impl.packages t.clock @ Impl.packages t.ethernet
 
   let libraries t  =
     (match !mode with
-     | `Unix -> [ "tcpip.ipv4-unix" ]
+     | `Unix | `MacOSX -> [ "tcpip.ipv4-unix" ]
      | `Xen  -> [ "tcpip.ipv4" ])
     @ Impl.libraries t.ethernet
 
@@ -927,8 +964,10 @@ module IPV4 = struct
     let name = name t in
     let mname = module_name t in
     Impl.configure t.ethernet;
-    append_main "module %s = Ipv4.Make(%s)"
-      (module_name t) (Impl.module_name t.ethernet);
+    Impl.configure t.clock;
+    Impl.configure t.time;
+    append_main "module %s = Ipv4.Make(%s)(%s)(%s)"
+      (module_name t) (Impl.module_name t.ethernet) (Impl.module_name t.clock)  (Impl.module_name t.time);
     newline_main ();
     append_main "let %s () =" name;
     append_main "   %s () >>= function" (Impl.name t.ethernet);
@@ -940,9 +979,9 @@ module IPV4 = struct
     append_main "   let i = Ipaddr.V4.of_string_exn in";
     append_main "   %s.set_ip ip (i %S) >>= fun () ->"
       mname (Ipaddr.V4.to_string t.config.address);
-    append_main "   %s.set_netmask ip (i %S) >>= fun () ->"
+    append_main "   %s.set_ip_netmask ip (i %S) >>= fun () ->"
       mname (Ipaddr.V4.to_string t.config.netmask);
-    append_main "   %s.set_gateways ip [%s] >>= fun () ->"
+    append_main "   %s.set_ip_gateways ip [%s] >>= fun () ->"
       mname
       (String.concat "; "
          (List.map
@@ -959,14 +998,108 @@ module IPV4 = struct
 
 end
 
-type ipv4 = IPV4
+type ipv6_config = (Ipaddr.V6.t, Ipaddr.V6.Prefix.t list) ip_config
 
-let ipv4 = Type IPV4
+let meta_ipv6_config t =
+  Printf.sprintf "(Ipaddr.V6.of_string_exn %S, [%s], [%s])"
+    (Ipaddr.V6.to_string t.address)
+    (String.concat "; "
+       (List.map (Printf.sprintf "Ipaddr.V6.Prefix.of_string_exn %S")
+          (List.map Ipaddr.V6.Prefix.to_string t.netmask)))
+    (String.concat "; "
+       (List.map (Printf.sprintf "Ipaddr.V6.of_string_exn %S")
+          (List.map Ipaddr.V6.to_string t.gateways)))
 
-let create_ipv4 net ip =
+module IPV6 = struct
+
+  type t = {
+    time    : time impl;
+    clock   : clock impl;
+    ethernet: ethernet impl;
+    config  : ipv6_config;
+  }
+  (* XXX: should the type if ipv4.id be ipv4.t ?
+     N.connect ethif |> N.set_ip up *)
+
+  let name t =
+    let key = "ipv6" ^ Impl.name t.time ^ Impl.name t.clock ^ Impl.name t.ethernet ^ meta_ipv6_config t.config in
+    Name.of_key key ~base:"ipv6"
+
+  let module_name t =
+    String.capitalize (name t)
+
+  let packages t =
+    "tcpip" :: Impl.packages t.time @ Impl.packages t.clock @ Impl.packages t.ethernet
+
+  let libraries t  =
+    (match !mode with
+     | `Unix | `MacOSX -> [ "tcpip.ipv6-unix" ]
+     | `Xen  -> [ "tcpip.ipv6" ])
+    @ Impl.libraries t.time @ Impl.libraries t.clock @ Impl.libraries t.ethernet
+
+  let configure t =
+    let name = name t in
+    let mname = module_name t in
+    Impl.configure t.ethernet;
+    append_main "module %s = Ipv6.Make(%s)(%s)(%s)"
+      (module_name t) (Impl.module_name t.ethernet) (Impl.module_name t.time) (Impl.module_name t.clock);
+    newline_main ();
+    append_main "let %s () =" name;
+    append_main "   %s () >>= function" (Impl.name t.ethernet);
+    append_main "   | `Error _ -> %s" (driver_initialisation_error name);
+    append_main "   | `Ok eth  ->";
+    append_main "   %s.connect eth >>= function" mname;
+    append_main "   | `Error _ -> %s" (driver_initialisation_error name);
+    append_main "   | `Ok ip   ->";
+    append_main "   let i = Ipaddr.V6.of_string_exn in";
+    append_main "   %s.set_ip ip (i %S) >>= fun () ->"
+      mname (Ipaddr.V6.to_string t.config.address);
+    List.iter begin fun netmask ->
+      append_main "   %s.set_ip_netmask ip (i %S) >>= fun () ->"
+        mname (Ipaddr.V6.Prefix.to_string netmask)
+    end t.config.netmask;
+    append_main "   %s.set_ip_gateways ip [%s] >>= fun () ->"
+      mname
+      (String.concat "; "
+         (List.map
+            (fun n -> Printf.sprintf "(i %S)" (Ipaddr.V6.to_string n))
+            t.config.gateways));
+    append_main "   return (`Ok ip)";
+    newline_main ()
+
+  let clean t =
+    Impl.clean t.time;
+    Impl.clean t.clock;
+    Impl.clean t.ethernet
+
+  let update_path t root =
+    { t with
+      time = Impl.update_path t.time root;
+      clock = Impl.update_path t.clock root;
+      ethernet = Impl.update_path t.ethernet root }
+
+end
+
+type v4
+type v6
+
+type 'a ip = IP
+
+let ip = Type IP
+
+type ipv4 = v4 ip
+type ipv6 = v6 ip
+
+let ipv4 : ipv4 typ = ip
+let ipv6 : ipv6 typ = ip
+
+let create_ipv4 ?(clock = default_clock) ?(time = default_time) net config =
+  let etif = etif net in
   let t = {
-    IPV4.ethernet = etif net;
-    config = ip } in
+    IPV4.ethernet = etif;
+    clock;
+    time;
+    config } in
   impl ipv4 t (module IPV4)
 
 let default_ipv4_conf =
@@ -980,12 +1113,24 @@ let default_ipv4_conf =
 let default_ipv4 net =
   create_ipv4 net default_ipv4_conf
 
-module UDPV4_direct = struct
+let create_ipv6
+    ?(time = default_time)
+    ?(clock = default_clock)
+    net config =
+  let etif = etif net in
+  let t = {
+    IPV6.ethernet = etif;
+    time; clock;
+    config
+  } in
+  impl ipv6 t (module IPV6)
 
-  type t = ipv4 impl
+module UDP_direct (V : sig type t end) = struct
+
+  type t = V.t ip impl
 
   let name t =
-    Name.of_key ("udpv4" ^ Impl.name t) ~base:"udpv4"
+    Name.of_key ("udp" ^ Impl.name t) ~base:"udp"
 
   let module_name t =
     String.capitalize (name t)
@@ -994,12 +1139,12 @@ module UDPV4_direct = struct
     Impl.packages t @ [ "tcpip" ]
 
   let libraries t =
-    Impl.libraries t @ [ "tcpip.udpv4" ]
+    Impl.libraries t @ [ "tcpip.udp" ]
 
   let configure t =
     let name = name t in
     Impl.configure t;
-    append_main "module %s = Udpv4.Make(%s)" (module_name t) (Impl.module_name t);
+    append_main "module %s = Udp.Make(%s)" (module_name t) (Impl.module_name t);
     newline_main ();
     append_main "let %s () =" name;
     append_main "   %s () >>= function" (Impl.name t);
@@ -1027,7 +1172,7 @@ module UDPV4_socket = struct
 
   let libraries t =
     match !mode with
-    | `Unix -> [ "tcpip.udpv4-socket" ]
+    | `Unix | `MacOSX -> [ "tcpip.udpv4-socket" ]
     | `Xen  -> failwith "No socket implementation available for Xen"
 
   let configure t =
@@ -1048,31 +1193,36 @@ module UDPV4_socket = struct
 
 end
 
-type udpv4 = UDPV4
+type 'a udp = UDP
 
-let udpv4 = Type UDPV4
+type udpv4 = v4 udp
+type udpv6 = v6 udp
 
-let direct_udpv4 ip =
-  impl udpv4 ip (module UDPV4_direct)
+let udp = Type UDP
+let udpv4 : udpv4 typ = udp
+let udpv6 : udpv6 typ = udp
+
+let direct_udp (type v) (ip : v ip impl) =
+  impl udp ip (module UDP_direct (struct type t = v end))
 
 let socket_udpv4 ip =
   impl udpv4 ip (module UDPV4_socket)
 
-module TCPV4_direct = struct
+module TCP_direct (V : sig type t end) = struct
 
   type t = {
     clock : clock impl;
     time  : time impl;
-    ipv4  : ipv4 impl;
+    ip    : V.t ip impl;
     random: random impl;
   }
 
   let name t =
-    let key = "tcpv4"
+    let key = "tcp"
               ^ Impl.name t.clock
               ^ Impl.name t.time
-              ^ Impl.name t.ipv4 in
-    Name.of_key key ~base:"tcpv4"
+              ^ Impl.name t.ip in
+    Name.of_key key ~base:"tcp"
 
   let module_name t =
     String.capitalize (name t)
@@ -1081,44 +1231,44 @@ module TCPV4_direct = struct
     "tcpip"
     :: Impl.packages t.clock
     @  Impl.packages t.time
-    @  Impl.packages t.ipv4
+    @  Impl.packages t.ip
     @  Impl.packages t.random
 
   let libraries t =
-    "tcpip.tcpv4"
+    "tcpip.tcp"
     :: Impl.libraries t.clock
     @  Impl.libraries t.time
-    @  Impl.libraries t.ipv4
+    @  Impl.libraries t.ip
     @  Impl.libraries t.random
 
   let configure t =
     let name = name t in
     Impl.configure t.clock;
     Impl.configure t.time;
-    Impl.configure t.ipv4;
+    Impl.configure t.ip;
     Impl.configure t.random;
-    append_main "module %s = Tcpv4.Flow.Make(%s)(%s)(%s)(%s)"
+    append_main "module %s = Tcp.Flow.Make(%s)(%s)(%s)(%s)"
       (module_name t)
-      (Impl.module_name t.ipv4)
+      (Impl.module_name t.ip)
       (Impl.module_name t.time)
       (Impl.module_name t.clock)
       (Impl.module_name t.random);
     newline_main ();
     append_main "let %s () =" name;
-    append_main "   %s () >>= function" (Impl.name t.ipv4);
-    append_main "   | `Error _ -> %s" (driver_initialisation_error (Impl.name t.ipv4));
+    append_main "   %s () >>= function" (Impl.name t.ip);
+    append_main "   | `Error _ -> %s" (driver_initialisation_error (Impl.name t.ip));
     append_main "   | `Ok ip   -> %s.connect ip" (module_name t);
     newline_main ()
 
   let clean t =
     Impl.clean t.clock;
     Impl.clean t.time;
-    Impl.clean t.ipv4;
+    Impl.clean t.ip;
     Impl.clean t.random
 
   let update_path t root =
     { clock  = Impl.update_path t.clock root;
-      ipv4   = Impl.update_path t.ipv4 root;
+      ip     = Impl.update_path t.ip root;
       time   = Impl.update_path t.time root;
       random = Impl.update_path t.random root;
     }
@@ -1137,7 +1287,7 @@ module TCPV4_socket = struct
 
   let libraries t =
     match !mode with
-    | `Unix -> [ "tcpip.tcpv4-socket" ]
+    | `Unix | `MacOSX -> [ "tcpip.tcpv4-socket" ]
     | `Xen  -> failwith "No socket implementation available for Xen"
 
   let configure t =
@@ -1158,14 +1308,20 @@ module TCPV4_socket = struct
 
 end
 
-type tcpv4 = TCPV4
+type 'a tcp = TCP
 
-let tcpv4 = Type TCPV4
+type tcpv4 = v4 tcp
+type tcpv6 = v6 tcp
 
-let direct_tcpv4
-    ?(clock=default_clock) ?(random=default_random) ?(time=default_time) ipv4 =
-  let t = { TCPV4_direct.clock; random; time; ipv4 } in
-  impl tcpv4 t (module TCPV4_direct)
+let tcp = Type TCP
+let tcpv4 : tcpv4 typ = tcp
+let tcpv6 : tcpv6 typ = tcp
+
+let direct_tcp (type v)
+    ?(clock=default_clock) ?(random=default_random) ?(time=default_time) (ip : v ip impl) =
+  let module TCP_direct = TCP_direct (struct type t = v end) in
+  let t = { TCP_direct.clock; random; time; ip } in
+  impl tcp t (module TCP_direct)
 
 let socket_tcpv4 ip =
   impl tcpv4 ip (module TCPV4_socket)
@@ -1206,6 +1362,7 @@ module STACKV4_direct = struct
 
   let libraries t =
     "tcpip.stack-direct"
+    :: "mirage.runtime"
     :: Impl.libraries t.clock
     @  Impl.libraries t.time
     @  Impl.libraries t.console
@@ -1219,21 +1376,24 @@ module STACKV4_direct = struct
     Impl.configure t.console;
     Impl.configure t.network;
     Impl.configure t.random;
-    append_main "module %s = struct" (module_name t);
-    append_main "  module E = Ethif.Make(%s)" (Impl.module_name t.network);
-    append_main "  module I = Ipv4.Make(E)";
-    append_main "  module U = Udpv4.Make(I)";
-    append_main "  module T = Tcpv4.Flow.Make(I)(%s)(%s)(%s)"
-      (Impl.module_name t.time)
-      (Impl.module_name t.clock)
-      (Impl.module_name t.random);
-    append_main "  module S = Tcpip_stack_direct.Make(%s)(%s)(%s)(%s)(E)(I)(U)(T)"
+    let ethif_name = module_name t ^ "_E" in
+    let ipv4_name = module_name t ^ "_I" in
+    let udpv4_name = module_name t ^ "_U" in
+    let tcpv4_name = module_name t ^ "_T" in
+    append_main "module %s = Ethif.Make(%s)" ethif_name (Impl.module_name t.network);
+    append_main "module %s = Ipv4.Make(%s)(%s)(%s)" ipv4_name ethif_name
+      (Impl.module_name t.clock) (Impl.module_name t.time);
+    append_main "module %s = Udp.Make (%s)" udpv4_name ipv4_name;
+    append_main "module %s = Tcp.Flow.Make(%s)(%s)(%s)(%s)"
+      tcpv4_name ipv4_name (Impl.module_name t.time)
+      (Impl.module_name t.clock) (Impl.module_name t.random);
+    append_main "module %s = Tcpip_stack_direct.Make(%s)(%s)(%s)(%s)(%s)(%s)(%s)(%s)"
+      (module_name t)
       (Impl.module_name t.console)
       (Impl.module_name t.time)
       (Impl.module_name t.random)
-      (Impl.module_name t.network);
-    append_main "  include S";
-    append_main "end";
+      (Impl.module_name t.network)
+      ethif_name ipv4_name udpv4_name tcpv4_name;
     newline_main ();
     append_main "let %s () =" name;
     append_main "  %s () >>= function" (Impl.name t.console);
@@ -1241,8 +1401,10 @@ module STACKV4_direct = struct
       (driver_initialisation_error (Impl.name t.console));
     append_main "  | `Ok console ->";
     append_main "  %s () >>= function" (Impl.name t.network);
-    append_main "  | `Error _      -> %s"
-      (driver_initialisation_error (Impl.name t.network));
+    append_main "  | `Error e      ->";
+    let net_init_error_msg_fn = "Mirage_runtime.string_of_network_init_error" in
+    append_main "    fail (Failure (%s %S e))"
+      net_init_error_msg_fn (Impl.name t.network);
     append_main "  | `Ok interface ->";
     append_main "  let config = {";
     append_main "    V1_LWT.name = %S;" name;
@@ -1252,7 +1414,19 @@ module STACKV4_direct = struct
       | `IPV4 i -> append_main "    mode = `IPv4 %s;" (meta_ipv4_config i);
     end;
     append_main "  } in";
-    append_main "  %s.connect config" (module_name t);
+    append_main "  %s.connect interface >>= function" ethif_name;
+    append_main "  | `Error _ -> %s" (driver_initialisation_error ethif_name);
+    append_main "  | `Ok ethif ->";
+    append_main "  %s.connect ethif >>= function" ipv4_name;
+    append_main "  | `Error _ -> %s" (driver_initialisation_error ipv4_name);
+    append_main "  | `Ok ipv4 ->";
+    append_main "  %s.connect ipv4 >>= function" udpv4_name;
+    append_main "  | `Error _ -> %s" (driver_initialisation_error udpv4_name);
+    append_main "  | `Ok udpv4 ->";
+    append_main "  %s.connect ipv4 >>= function" tcpv4_name;
+    append_main "  | `Error _ -> %s" (driver_initialisation_error tcpv4_name);
+    append_main "  | `Ok tcpv4 ->";
+    append_main "  %s.connect config ethif ipv4 udpv4 tcpv4" (module_name t);
     newline_main ()
 
   let clean t =
@@ -1315,7 +1489,13 @@ module STACKV4_socket = struct
     append_main "    console; interface = [%s];" (meta_ips t.ipv4s);
     append_main "    mode = ();";
     append_main "  } in";
-    append_main "  %s.connect config" (module_name t);
+    append_main "  Udpv4_socket.connect None >>= function";
+    append_main "  | `Error _ -> %s" (driver_initialisation_error "Udpv4_socket");
+    append_main "  | `Ok udpv4 ->";
+    append_main "  Tcpv4_socket.connect None >>= function";
+    append_main "  | `Error _ -> %s" (driver_initialisation_error "Tcpv4_socket");
+    append_main "  | `Ok tcpv4 ->";
+    append_main "  %s.connect config udpv4 tcpv4" (module_name t);
     newline_main ()
 
   let clean t =
@@ -1326,9 +1506,9 @@ module STACKV4_socket = struct
 
 end
 
-type stackv4 = STACK4
+type stackv4 = STACKV4
 
-let stackv4 = Type STACK4
+let stackv4 = Type STACKV4
 
 let direct_stackv4_with_dhcp
     ?(clock=default_clock)
@@ -1365,33 +1545,116 @@ let direct_stackv4_with_static_ipv4
 let socket_stackv4 console ipv4s =
   impl stackv4 { STACKV4_socket.console; ipv4s } (module STACKV4_socket)
 
-module Channel_over_TCPV4 = struct
+module VCHAN_localhost = struct
 
-  type t = tcpv4 impl
+  type uuid = string
+  type t = uuid
 
   let name t =
-    let key = "channel" ^ Impl.name t in
-    Name.of_key key ~base:"channel"
+    let key = "in_memory" in
+    Name.of_key key ~base:"vchan"
 
   let module_name t =
     String.capitalize (name t)
 
-  let packages _ =
-    [ "mirage-tcpip" ]
+  let packages t =
+    [ "mirage-conduit" ]
 
-  let libraries _ =
-    [ "tcpip.channel" ]
+  let libraries t =
+    [ "conduit.mirage" ]
+
+  let configure t =
+    append_main "module %s = Conduit_localhost" (module_name t);
+    newline_main ();
+    append_main "let %s = %s.register %S" (name t) (module_name t) t;
+    newline_main ()
+
+  let clean t = ()
+
+  let update_path t root = t
+
+end
+
+module VCHAN_xenstore = struct
+
+  type uuid = string
+  type t = string
+
+  let name t =
+    let key = "xen" in
+    Name.of_key key ~base:"vchan"
+
+  let module_name t =
+    String.capitalize (name t)
+
+  let packages t =
+    match !mode with
+    |`Xen -> [ "vchan"; "mirage-xen"; "xen-evtchn"; "xen-gnt" ]
+    |`Unix | `MacOSX -> [ "vchan"; "xen-evtchn"; "xen-gnt"]
+    (* TODO: emit a failure on MacOSX? *)
+
+  let libraries t =
+    match !mode with
+    |`Xen -> [ "conduit.mirage-xen" ]
+    |`Unix | `MacOSX-> [ "vchan" ]
+
+  let configure t =
+    let m =
+      match !mode with
+      |`Xen -> "Conduit_xenstore"
+      |`Unix | `MacOSX -> "Vchan_lwt_unix.M"
+    in
+    append_main "module %s = %s" (module_name t) m;
+    newline_main ();
+    append_main "let %s = %s.register %S" (name t) (module_name t) t;
+    newline_main ()
+
+  let clean t = ()
+
+  let update_path t root = t
+
+end
+
+type vchan = STACK4
+
+let vchan = Type STACK4
+
+let vchan_localhost ?(uuid="localhost") () =
+  impl vchan uuid (module VCHAN_localhost)
+
+let vchan_xen ?(uuid="localhost") () =
+  impl vchan uuid (module VCHAN_xenstore)
+
+let vchan_default ?uuid () =
+  match !mode with
+  | `Xen -> vchan_xen ?uuid ()
+  | `Unix | `MacOSX -> vchan_localhost ?uuid ()
+
+module TLS_over_conduit = struct
+  type t = entropy impl
+
+  let name t =
+    let key = "tls_with_" ^ Impl.name t in
+    Name.of_key key ~base:"tls"
+
+  let module_name t =
+    String.capitalize (name t)
+
+  let packages t =
+    [ "tls" ] @ Impl.packages t
+
+  let libraries t =
+    [ "tls.mirage" ] @ Impl.libraries t
 
   let configure t =
     Impl.configure t;
-    append_main "module %s = Channel.Make(%s)" (module_name t) (Impl.module_name t);
+    append_main "module %s = Tls_mirage.Make(Conduit_mirage.Dynamic_flow)(%s)" (module_name t) (Impl.module_name t);
     newline_main ();
-    append_main "let %s () =" (name t);
+    append_main "let %s =" (name t);
     append_main "  %s () >>= function" (Impl.name t);
     append_main "  | `Error _    -> %s" (driver_initialisation_error (Impl.name t));
-    append_main "  | `Ok console ->";
-    append_main "  let flow = %s.create config in" (module_name t);
-    append_main "  return (`Ok flow)";
+    append_main "  | `Ok _entropy ->";
+    append_main "  return (`Ok ())";
     newline_main ()
 
   let clean t =
@@ -1399,87 +1662,279 @@ module Channel_over_TCPV4 = struct
 
   let update_path t root =
     Impl.update_path t root
-
 end
 
-type channel = CHANNEL
+module TLS_none = struct
+  type t = unit
 
-let channel = Type CHANNEL
+  let name () = "tls_none"
 
-let channel_over_tcpv4 flow =
-  impl channel flow (module Channel_over_TCPV4)
+  let module_name t =
+    String.capitalize (name t)
 
+  let packages () = []
+  let libraries () = []
 
-module HTTP = struct
+  let configure t =
+    append_main "module %s = Conduit_mirage.No_TLS" (module_name t);
+    append_main "let %s = return (`Ok ())" (name t);
+    newline_main ()
 
+  let clean () = ()
+  let update_path () root = ()
+end
+
+type conduit_tls = Conduit_TLS
+let conduit_tls = Type Conduit_TLS
+
+let tls_over_conduit entropy = impl conduit_tls entropy (module TLS_over_conduit)
+let tls_none = impl conduit_tls () (module TLS_none)
+
+module Conduit = struct
   type t =
-    [ `Channel of channel impl
-    | `Stack of int * stackv4 impl ]
+    [ `Stack of stackv4 impl * vchan impl * conduit_tls impl ]
 
   let name t =
-    let key = "http" ^ match t with
-      | `Channel c    -> Impl.name c
-      | `Stack (_, s) -> Impl.name s in
-    Name.of_key key ~base:"http"
+    let key = "conduit" ^ match t with
+     | `Stack (s,v,tls) ->
+          Printf.sprintf "%s_%s_%s" (Impl.name s) (Impl.name v) (Impl.name tls) in
+    Name.of_key key ~base:"conduit"
 
   let module_name_core t =
     String.capitalize (name t)
 
   let module_name t =
-    module_name_core t ^ ".Server"
+    module_name_core t
+
+  let packages t =
+    [ "conduit"; "mirage-types"; "vchan" ] @
+    match t with
+    | `Stack (s,v,tls) -> Impl.packages s @ Impl.packages v @ Impl.packages tls
+
+  let libraries t =
+    [ "conduit.mirage" ] @
+    match t with
+    | `Stack (s,v,tls) -> Impl.libraries s @ Impl.libraries v @ Impl.libraries tls
+
+  let configure t =
+    begin match t with
+      | `Stack (s,v,tls) ->
+        Impl.configure s;
+        Impl.configure v;
+        Impl.configure tls;
+        append_main "module %s = Conduit_mirage.Make(%s)(%s)(%s)"
+          (module_name_core t) (Impl.module_name s) (Impl.module_name v) (Impl.module_name tls);
+    end;
+    newline_main ();
+    append_main "let %s () =" (name t);
+    let (stack_subname, vchan_subname, tls_subname) = match t with
+      | `Stack (s,v,tls) -> Impl.name s, Impl.name v, Impl.name tls in
+
+    append_main "  %s () >>= function" stack_subname;
+    append_main "  | `Error _  -> %s" (driver_initialisation_error stack_subname);
+    append_main "  | `Ok %s ->" stack_subname;
+    append_main "  %s >>= fun %s ->" vchan_subname vchan_subname;
+    append_main "  %s >>= function" tls_subname;
+    append_main "  | `Error _  -> %s" (driver_initialisation_error tls_subname);
+    append_main "  | `Ok () ->";
+    append_main "  %s.init ~peer:%s ~stack:%s () >>= fun %s ->"
+      (module_name_core t) vchan_subname stack_subname (name t);
+    append_main "  return (`Ok %s)" (name t);
+    newline_main ()
+
+  let clean = function
+    | `Stack (s,v,tls) -> Impl.clean s; Impl.clean v; Impl.clean tls
+
+  let update_path t root =
+    match t with
+    | `Stack (s,v,tls) ->
+        `Stack ((Impl.update_path s root), (Impl.update_path v root), (Impl.update_path tls root))
+
+end
+
+type conduit = Conduit
+
+let conduit = Type Conduit
+
+let conduit_direct ?(vchan=vchan_localhost ()) ?(tls=tls_none) stack =
+  impl conduit (`Stack (stack,vchan,tls)) (module Conduit)
+
+type conduit_client = [
+  | `TCP of Ipaddr.t * int
+  | `Vchan of string list
+]
+
+type conduit_server = [
+  | `TCP of [ `Port of int ]
+  | `Vchan of string list
+]
+
+module Resolver_unix = struct
+  type t = unit
+
+  let name t =
+    let key = "resolver_unix" in
+    Name.of_key key ~base:"resolver"
+
+  let module_name_core t =
+    String.capitalize (name t)
+
+  let module_name t =
+      module_name_core t
+
+  let packages t =
+    match !mode with
+    |`Unix | `MacOSX -> [ "mirage-conduit" ]
+    |`Xen -> failwith "Resolver_unix not supported on Xen"
+
+  let libraries t =
+    [ "conduit.mirage"; "conduit.lwt-unix" ]
+
+  let configure t =
+    append_main "module %s = Resolver_lwt" (module_name t);
+    append_main "let %s () =" (name t);
+    append_main "  return (`Ok Resolver_lwt_unix.system)";
+    newline_main ()
+
+  let clean t = ()
+
+  let update_path t root = t
+
+end
+
+module Resolver_direct = struct
+  type t =
+    [ `DNS of stackv4 impl * Ipaddr.V4.t option * int option ]
+
+  let name t =
+    let key = "resolver" ^ match t with
+     | `DNS (s,_,_) -> Impl.name s in
+    Name.of_key key ~base:"resolver"
+
+  let module_name_core t =
+    String.capitalize (name t)
+
+  let module_name t =
+    (module_name_core t) ^ "_res"
+
+  let packages t =
+    [ "dns"; "tcpip" ] @
+    match t with
+    | `DNS (s,_,_) -> Impl.packages s
+
+  let libraries t =
+    [ "dns.mirage" ] @
+    match t with
+    | `DNS (s,_,_) -> Impl.libraries s
+
+  let configure t =
+    begin match t with
+      | `DNS (s,_,_) ->
+        Impl.configure s;
+        append_main "module %s = Resolver_lwt" (module_name t);
+        append_main "module %s_dns = Dns_resolver_mirage.Make(OS.Time)(%s)"
+          (module_name_core t) (Impl.module_name s);
+        append_main "module %s = Resolver_mirage.Make(%s_dns)"
+          (module_name_core t) (module_name_core t);
+    end;
+    newline_main ();
+    append_main "let %s () =" (name t);
+    let subname = match t with
+      | `DNS (s,_,_) -> Impl.name s in
+    append_main "  %s () >>= function" subname;
+    append_main "  | `Error _  -> %s" (driver_initialisation_error subname);
+    append_main "  | `Ok %s ->" subname;
+    let res_ns = match t with
+     | `DNS (_,None,_) -> "None"
+     | `DNS (_,Some ns,_) ->
+         Printf.sprintf "Ipaddr.V4.of_string %S" (Ipaddr.V4.to_string ns) in
+    append_main "  let ns = %s in" res_ns;
+    let res_ns_port = match t with
+     | `DNS (_,_,None) -> "None"
+     | `DNS (_,_,Some ns_port) -> Printf.sprintf "Some %d" ns_port in
+    append_main "  let ns_port = %s in" res_ns_port;
+    append_main "  let res = %s.init ?ns ?ns_port ~stack:%s () in" (module_name_core t) subname;
+    append_main "  return (`Ok res)";
+    newline_main ()
+
+  let clean = function
+    | `DNS (s,_,_) -> Impl.clean s
+
+  let update_path t root =
+    match t with
+    | `DNS (s,a,b) -> `DNS (Impl.update_path s root, a, b)
+
+end
+
+type resolver = Resolver
+
+let resolver = Type Resolver
+
+let resolver_dns ?ns ?ns_port stack =
+  impl resolver (`DNS (stack, ns, ns_port)) (module Resolver_direct)
+
+let resolver_unix_system =
+  impl resolver () (module Resolver_unix)
+
+module HTTP = struct
+
+  type t =
+    | Conduit of conduit_server * conduit impl
+
+  let name t =
+    let key = "http" ^ match t with
+      | Conduit (_, c) -> Impl.name c in
+    Name.of_key key ~base:"http"
+
+  let module_name t =
+    String.capitalize (name t)
 
   let packages t =
     [ "mirage-http" ] @
     match t with
-    | `Channel c    -> Impl.packages c
-    | `Stack (_, s) -> Impl.packages s
+    | Conduit (_, c) -> Impl.packages c
 
   let libraries t =
     [ "mirage-http" ] @
     match t with
-    | `Channel c    -> Impl.libraries c
-    | `Stack (_, s) -> Impl.libraries s
+    | Conduit (_, c) -> Impl.libraries c
 
   let configure t =
     begin match t with
-      | `Channel c ->
+      | Conduit (_, c) ->
         Impl.configure c;
-        append_main "module %s = HTTP.Make(%s)" (module_name_core t) (Impl.module_name c)
-      | `Stack (_, s) ->
-        Impl.configure s;
-        append_main "module %s_channel = Channel.Make(%s.TCPV4)"
-          (module_name_core t) (Impl.module_name s);
-        append_main "module %s = HTTP.Make(%s_channel)" (module_name_core t) (module_name_core t)
+        append_main "module %s = Cohttp_mirage.Server(%s.Flow)"
+          (module_name t) (Impl.module_name c)
     end;
     newline_main ();
     let subname = match t with
-      | `Channel c   -> Impl.name c
-      | `Stack (_,s) -> Impl.name s in
+      | Conduit (_,c) -> Impl.name c in
     append_main "let %s () =" (name t);
     append_main "  %s () >>= function" subname;
     append_main "  | `Error _  -> %s" (driver_initialisation_error subname);
-    append_main "  | `Ok stack ->";
+    append_main "  | `Ok %s ->" subname;
     begin match t with
-      | `Channel c   -> failwith "TODO"
-      | `Stack (p,s) ->
+      | Conduit (m,c) ->
         append_main "  let listen spec =";
-        append_main "    %s.listen_tcpv4 ~port:%d stack (fun flow ->" (Impl.module_name s) p;
-        append_main "      let chan = %s_channel.create flow in" (module_name_core t);
-        append_main "      %s.Server_core.callback spec chan chan" (module_name_core t);
-        append_main "    );";
-        append_main "    %s.listen stack in" (Impl.module_name s);
+        append_main "    let ctx = %s in" (Impl.name c);
+        append_main "    let mode = %s in"
+          (match m with
+           |`TCP (`Port port) -> Printf.sprintf "`TCP (`Port %d)" port
+           |`Vchan l -> failwith "Vchan not supported yet in server"
+          );
+        append_main "    %s.serve ~ctx ~mode (%s.listen spec)"
+          (Impl.module_name c) (module_name t);
+        append_main "  in";
         append_main "  return (`Ok listen)";
     end;
     newline_main ()
 
   let clean = function
-    | `Channel c    -> Impl.clean c
-    | `Stack (_, s) -> Impl.clean s
+    | Conduit (_,c) -> Impl.clean c
 
   let update_path t root =
     match t with
-    | `Channel c    -> `Channel (Impl.update_path c root)
-    | `Stack (p, s) -> `Stack (p, Impl.update_path s root)
+    | Conduit (m, c) -> Conduit (m, Impl.update_path c root)
 
 end
 
@@ -1487,11 +1942,8 @@ type http = HTTP
 
 let http = Type HTTP
 
-let http_server_of_channel chan =
-  impl http (`Channel chan) (module HTTP)
-
-let http_server port stack =
-  impl http (`Stack (port, stack)) (module HTTP)
+let http_server mode conduit =
+  impl http (HTTP.Conduit (mode, conduit)) (module HTTP)
 
 type job = JOB
 
@@ -1532,10 +1984,54 @@ module Job = struct
 
 end
 
+module Tracing = struct
+  type t = {
+    size : int;
+  }
+
+  let unix_trace_file = "trace.ctf"
+
+  let packages _ = StringSet.singleton "mirage-profile"
+
+  let libraries _ =
+    match !mode with
+    | `Unix | `MacOSX -> StringSet.singleton "mirage-profile.unix"
+    | `Xen  -> StringSet.singleton "mirage-profile.xen"
+
+  let configure t =
+    if Sys.command "ocamlfind query lwt.tracing 2>/dev/null" <> 0 then (
+      flush stdout;
+      error "lwt.tracing module not found. Hint:\n\
+             opam pin add lwt 'https://github.com/mirage/lwt.git#tracing'"
+    );
+
+    append_main "let () = ";
+    begin match !mode with
+    | `Unix | `MacOSX ->
+        append_main "  let buffer = MProf_unix.mmap_buffer ~size:%d %S in" t.size unix_trace_file;
+        append_main "  let trace_config = MProf.Trace.Control.make buffer MProf_unix.timestamper in";
+        append_main "  MProf.Trace.Control.start trace_config";
+    | `Xen  ->
+        append_main "  let trace_pages = MProf_xen.make_shared_buffer ~size:%d in" t.size;
+        append_main "  let buffer = trace_pages |> Io_page.to_cstruct |> Cstruct.to_bigarray in";
+        append_main "  let trace_config = MProf.Trace.Control.make buffer MProf_xen.timestamper in";
+        append_main "  MProf.Trace.Control.start trace_config;";
+        append_main "  MProf_xen.share_with (module Gnt.Gntshr) (module OS.Xs) ~domid:0 trace_pages";
+        append_main "  |> OS.Main.run";
+    end;
+    newline_main ()
+end
+
+type tracing = Tracing.t
+
+let mprof_trace ~size () =
+  { Tracing.size }
+
 type t = {
   name: string;
   root: string;
   jobs: job impl list;
+  tracing: tracing option;
 }
 
 let t = ref None
@@ -1549,18 +2045,23 @@ let reset () =
 let set_config_file f =
   config_file := Some f
 
+let get_config_file () =
+  match !config_file with
+  | None -> Sys.getcwd () / "config.ml"
+  | Some f -> f
+
 let update_path t root =
   { t with jobs = List.map (fun j -> Impl.update_path j root) t.jobs }
 
-let register name jobs =
+let register ?tracing name jobs =
   let root = match !config_file with
     | None   -> failwith "no config file"
     | Some f -> Filename.dirname f in
-  t := Some { name; jobs; root }
+  t := Some { name; jobs; root; tracing }
 
 let registered () =
   match !t with
-  | None   -> { name = "empty"; jobs = []; root = Sys.getcwd () }
+  | None   -> { name = "empty"; jobs = []; root = Sys.getcwd (); tracing = None }
   | Some t -> t
 
 let ps = ref StringSet.empty
@@ -1570,12 +2071,16 @@ let add_to_opam_packages p =
 
 let packages t =
   let m = match !mode with
-    | `Unix -> "mirage-unix"
+    | `Unix | `MacOSX -> "mirage-unix"
     | `Xen  -> "mirage-xen" in
+  let ps = StringSet.add m !ps in
+  let ps = match t.tracing with
+    | None -> ps
+    | Some tracing -> StringSet.union (Tracing.packages tracing) ps in
   let ps = List.fold_left (fun set j ->
       let ps = StringSet.of_list (Impl.packages j) in
       StringSet.union ps set
-    ) (StringSet.add m !ps) t.jobs in
+    ) ps t.jobs in
   StringSet.elements ps
 
 let ls = ref StringSet.empty
@@ -1585,12 +2090,16 @@ let add_to_ocamlfind_libraries l =
 
 let libraries t =
   let m = match !mode with
-    | `Unix -> "mirage-types.lwt"
+    | `Unix | `MacOSX -> "mirage-types.lwt"
     | `Xen  -> "mirage-types.lwt" in
+  let ls = StringSet.add m !ls in
+  let ls = match t.tracing with
+    | None -> ls
+    | Some tracing -> StringSet.union (Tracing.libraries tracing) ls in
   let ls = List.fold_left (fun set j ->
       let ls = StringSet.of_list (Impl.libraries j) in
       StringSet.union ls set
-    ) (StringSet.add m !ls) t.jobs in
+    ) ls t.jobs in
   StringSet.elements ls
 
 let configure_myocamlbuild_ml t =
@@ -1633,6 +2142,56 @@ let configure_myocamlbuild_ml t =
 let clean_myocamlbuild_ml t =
   remove (t.root / "myocamlbuild.ml")
 
+let configure_main_libvirt_xml t =
+  let file = t.root / t.name ^ "_libvirt.xml" in
+  let oc = open_out file in
+  append oc "<!-- %s -->" generated_by_mirage;
+  append oc "<domain type='xen'>";
+  append oc "    <name>%s</name>" t.name;
+  append oc "    <memory unit='KiB'>262144</memory>";
+  append oc "    <currentMemory unit='KiB'>262144</currentMemory>";
+  append oc "    <vcpu placement='static'>1</vcpu>";
+  append oc "    <os>";
+  append oc "        <type arch='armv7l' machine='xenpv'>linux</type>";
+  append oc "        <kernel>%s/mir-%s.xen</kernel>" t.root t.name;
+  append oc "        <cmdline> </cmdline>"; (* the libxl driver currently needs an empty cmdline to be able to start the domain on arm - due to this? http://lists.xen.org/archives/html/xen-devel/2014-02/msg02375.html *)
+  append oc "    </os>";
+  append oc "    <clock offset='utc' adjustment='reset'/>";
+  append oc "    <on_crash>preserve</on_crash>";
+  append oc "    <!-- ";
+  append oc "    You must define network and block interfaces manually.";
+  append oc "    See http://libvirt.org/drvxen.html for information about converting .xl-files to libvirt xml automatically.";
+  append oc "    -->";
+  append oc "    <devices>";
+  append oc "        <!--";
+  append oc "        The disk configuration is defined here:";
+  append oc "        http://libvirt.org/formatstorage.html.";
+  append oc "        An example would look like:";
+  append oc"         <disk type='block' device='disk'>";
+  append oc "            <driver name='phy'/>";
+  append oc "            <source dev='/dev/loop0'/>";
+  append oc "            <target dev='' bus='xen'/>";
+  append oc "        </disk>";
+  append oc "        -->";
+  append oc "        <!-- ";
+  append oc "        The network configuration is defined here:";
+  append oc "        http://libvirt.org/formatnetwork.html";
+  append oc "        An example would look like:";
+  append oc "        <interface type='bridge'>";
+  append oc "            <mac address='c0:ff:ee:c0:ff:ee'/>";
+  append oc "            <source bridge='br0'/>";
+  append oc "        </interface>";
+  append oc "        -->";
+  append oc "        <console type='pty'>";
+  append oc "            <target type='xen' port='0'/>";
+  append oc "        </console>";
+  append oc "    </devices>";
+  append oc "</domain>";
+  close_out oc
+
+let clean_main_libvirt_xml t =
+  remove (t.root / t.name ^ "_libvirt.xml")
+
 let configure_main_xl t =
   let file = t.root / t.name ^ ".xl" in
   let oc = open_out file in
@@ -1660,45 +2219,61 @@ let configure_main_xl t =
 let clean_main_xl t =
   remove (t.root / t.name ^ ".xl")
 
+let configure_main_xe t =
+  let file = t.root / t.name ^ ".xe" in
+  let oc = open_out file in
+  append oc "#!/bin/sh";
+  append oc "# %s" generated_by_mirage;
+  newline oc;
+  append oc "set -e";
+  newline oc;
+  append oc "# Dependency: xe";
+  append oc "command -v xe >/dev/null 2>&1 || { echo >&2 \"I require xe but it's not installed.  Aborting.\"; exit 1; }";
+  append oc "# Dependency: xe-unikernel-upload";
+  append oc "command -v xe-unikernel-upload >/dev/null 2>&1 || { echo >&2 \"I require xe-unikernel-upload but it's not installed.  Aborting.\"; exit 1; }";
+  append oc "# Dependency: a $HOME/.xe";
+  append oc "if [ ! -e $HOME/.xe ]; then";
+  append oc "  echo Please create a config file for xe in $HOME/.xe which contains:";
+  append oc "  echo server='<IP or DNS name of the host running xapi>'";
+  append oc "  echo username=root";
+  append oc "  echo password=password";
+  append oc "  exit 1";
+  append oc "fi";
+  newline oc;
+  append oc "echo Uploading VDI containing unikernel";
+  append oc "VDI=$(xe-unikernel-upload --path %s/mir-%s.xen)" t.root t.name;
+  append oc "echo VDI=$VDI";
+  append oc "echo Creating VM metadata";
+  append oc "VM=$(xe vm-create name-label=%s)" t.name;
+  append oc "echo VM=$VM";
+  append oc "xe vm-param-set uuid=$VM PV-bootloader=pygrub";
+  append oc "echo Adding network interface connected to xenbr0";
+  append oc "ETH0=$(xe network-list bridge=xenbr0 params=uuid --minimal)";
+  append oc "VIF=$(xe vif-create vm-uuid=$VM network-uuid=$ETH0 device=0)";
+  append oc "echo Atting block device and making it bootable";
+  append oc "VBD=$(xe vbd-create vm-uuid=$VM vdi-uuid=$VDI device=0)";
+  append oc "xe vbd-param-set uuid=$VBD bootable=true";
+  append oc "xe vbd-param-set uuid=$VBD other-config:owner=true";
+  append oc "echo Starting VM";
+  append oc "xe vm-start vm=%s" t.name;
+  close_out oc;
+  Unix.chmod file 0o755
+
+let clean_main_xe t =
+  remove (t.root / t.name ^ ".xe")
+
 (* Get the linker flags for any extra C objects we depend on.
  * This is needed when building a Xen image as we do the link manually. *)
 let get_extra_ld_flags ~filter pkgs =
-  (* Query ocamlfind to get all the cmxa archives we're using. *)
-  let ocaml_archives = read_command
-    "ocamlfind query -r -separator ' ' -format %%d/%%a -predicates native %s"
+  let output = read_command
+    "ocamlfind query -r -format '%%d\t%%(xen_linkopts)' -predicates native %s"
     (String.concat " " pkgs) in
-
-  let current_dir = ref None in
-  let ld_flags = ref [] in
-
-  let add_archives c_objects =
-    match !current_dir with
-    | None -> failwith "Missing File line in ocamlobjinfo output!"
-    | Some dir ->
-    let add_dir = lazy (ld_flags := ("-L" ^ dir) :: !ld_flags) in
-    split c_objects ' ' |> List.iter (fun arg ->
-      match after "-l" arg with
-      | None -> ()
-      | Some lib ->
-        if filter lib then (
-          Lazy.force add_dir;
-          ld_flags := arg :: !ld_flags
-        )
-    ) in
-
-  (* Use ocamlobjinfo to get the extra C objects needed by each cmxa.
-   * Note: we can't use compiler-libs here because it defines its own Config
-   * module, which conflicts with Mirage's use of config.ml *)
-  let output = read_command "ocamlobjinfo %s" ocaml_archives in
-  split output '\n' |> List.iter (fun line ->
-    match after "File " line with
-    | Some path -> current_dir := Some (Filename.dirname path)
-    | None ->
-    match after "Extra C object files: " line with
-    | Some args -> add_archives args
-    | None -> ()
-  );
-  List.rev !ld_flags
+  split output '\n'
+  |> List.fold_left (fun acc line ->
+    match cut_at line '\t' with
+    | None -> acc
+    | Some (dir, ldflags) -> Printf.sprintf "-L%s %s" dir ldflags :: acc
+  ) []
 
 let configure_makefile t =
   let file = t.root / "Makefile" in
@@ -1713,23 +2288,31 @@ let configure_makefile t =
   newline oc;
   append oc "LIBS   = %s" libraries_str;
   append oc "PKGS   = %s" packages;
-  append oc "SYNTAX = -tags \"syntax(camlp4o),annot,bin_annot,strict_sequence,principal\"\n";
   begin match !mode with
     | `Xen  ->
-      append oc "FLAGS  = -cflag -g -lflags -g,-linkpkg,-dontlink,unix\n"
+      append oc "SYNTAX = -tags \"syntax(camlp4o),annot,bin_annot,strict_sequence,principal\"\n";
+      append oc "SYNTAX += -tag-line \"<static*.*>: -syntax(camlp4o)\"\n";
+      append oc "FLAGS  = -cflag -g -lflags -g,-linkpkg,-dontlink,unix\n";
+      append oc "XENLIB = $(shell ocamlfind query mirage-xen)\n"
     | `Unix ->
+      append oc "SYNTAX = -tags \"syntax(camlp4o),annot,bin_annot,strict_sequence,principal\"\n";
+      append oc "SYNTAX += -tag-line \"<static*.*>: -syntax(camlp4o)\"\n";
+      append oc "FLAGS  = -cflag -g -lflags -g,-linkpkg\n"
+    | `MacOSX ->
+      append oc "SYNTAX = -tags \"syntax(camlp4o),annot,bin_annot,strict_sequence,principal,thread\"\n";
+      append oc "SYNTAX += -tag-line \"<static*.*>: -syntax(camlp4o)\"\n";
       append oc "FLAGS  = -cflag -g -lflags -g,-linkpkg\n"
   end;
-  append oc "BUILD  = ocamlbuild -classic-display -use-ocamlfind $(LIBS) $(SYNTAX) $(FLAGS)\n\
+  append oc "BUILD  = ocamlbuild -use-ocamlfind $(LIBS) $(SYNTAX) $(FLAGS)\n\
              OPAM   = opam\n\n\
              export PKG_CONFIG_PATH=$(shell opam config var prefix)/lib/pkgconfig\n\n\
              export OPAMVERBOSE=1\n\
              export OPAMYES=1";
   newline oc;
   append oc ".PHONY: all depend clean build main.native\n\
-             all: build\n\
+             all:: build\n\
              \n\
-             depend:\n\
+             depend::\n\
              \t$(OPAM) install $(PKGS) --verbose\n\
              \n\
              main.native:\n\
@@ -1756,49 +2339,68 @@ let configure_makefile t =
 
   begin match !mode with
     | `Xen ->
+      let filter = function
+        | "unix" | "bigarray" |"shared_memory_ring_stubs" -> false    (* Provided by mirage-xen instead. *)
+        | _ -> true in
       let extra_c_archives =
-        get_extra_ld_flags ~filter:((<>) "unix") pkgs
+        get_extra_ld_flags ~filter pkgs
         |> String.concat " \\\n\t  " in
 
-      append oc "build: main.native.o";
-      let pkg_config_deps = "openlibm 'libminios-xen >= 0.2'" in
-      let path = read_command "ocamlfind printconf path" in
-      let lib = strip path ^ "/mirage-xen" in
+      append oc "build:: main.native.o";
+      let pkg_config_deps = "mirage-xen" in
       append oc "\tpkg-config --print-errors --exists %s" pkg_config_deps;
-      append oc "\tld -d -static -nostdlib --start-group \\\n\
-                 \t  $$(pkg-config --static --libs %s) \\\n\
-                 \t  _build/main.native.o %s/libocaml.a \\\n\
-                 \t  %s/libxencaml.a --end-group \\\n\
+      append oc "\tld -d -static -nostdlib \\\n\
+                 \t  _build/main.native.o \\\n\
                  \t  %s \\\n\
+                 \t  $$(pkg-config --static --libs %s) \\\n\
                  \t  $(shell gcc -print-libgcc-file-name) \\\n\
                  %s"
-        pkg_config_deps lib lib extra_c_archives generate_image;
-    | `Unix ->
+        extra_c_archives pkg_config_deps generate_image;
+    | `Unix | `MacOSX ->
       append oc "build: main.native";
       append oc "\tln -nfs _build/main.native mir-%s" t.name;
   end;
   newline oc;
-  append oc "run: build";
-  begin match !mode with
-    | `Xen ->
-      append oc "\t@echo %s.xl has been created. Edit it to add VIFs or VBDs" t.name;
-      append oc "\t@echo Then do something similar to: xl create -c %s.xl\n" t.name
-    | `Unix ->
-      append oc "\t$(SUDO) ./mir-%s\n" t.name
-  end;
-  append oc "clean:\n\
+  append oc "clean::\n\
              \tocamlbuild -clean";
+  newline oc;
+  append oc "-include Makefile.user";
   close_out oc
 
 let clean_makefile t =
   remove (t.root / "Makefile")
+
+let no_opam_version_check_ = ref false
+let no_opam_version_check b = no_opam_version_check_ := b
 
 let configure_opam t =
   info "Installing OPAM packages.";
   match packages t with
   | [] -> ()
   | ps ->
-    if command_exists "opam" then opam "install" ps
+    if command_exists "opam" then
+      if !no_opam_version_check_ then ()
+      else (
+        let opam_version = read_command "opam --version" in
+        let version_error () =
+          error "Your version of OPAM (%s) is not recent enough. \
+                 Please update to (at least) 1.2: https://opam.ocaml.org/doc/Install.html \
+                 You can pass the `--no-opam-version-check` flag to force its use." opam_version
+        in
+        match split opam_version '.' with
+        | major::minor::_ ->
+          let major = try int_of_string major with Failure _ -> 0 in
+          let minor = try int_of_string minor with Failure _ -> 0 in
+          if (major, minor) >= (1, 2) then (
+            if command_exists "opam-depext" then
+              info "opam depext is installed."
+            else
+              opam "install" ["depext"];
+            opam ~yes:false "depext" ps;
+            opam "install" ps
+          ) else version_error ()
+        | _ -> version_error ()
+      )
     else error "OPAM is not installed."
 
 let clean_opam t =
@@ -1815,10 +2417,8 @@ let clean_opam t =
     else error "OPAM is not installed."
 *)
 
-let manage_opam = ref true
-
-let manage_opam_packages b =
-  manage_opam := b
+let manage_opam_packages_ = ref true
+let manage_opam_packages b = manage_opam_packages_ := b
 
 let configure_job j =
   let name = Impl.name j in
@@ -1842,6 +2442,9 @@ let configure_main t =
   newline_main ();
   append_main "let _ = Printexc.record_backtrace true";
   newline_main ();
+  begin match t.tracing with
+  | None -> ()
+  | Some tracing -> Tracing.configure tracing end;
   List.iter (fun j -> Impl.configure j) t.jobs;
   List.iter configure_job t.jobs;
   let names = List.map (fun j -> Printf.sprintf "%s ()" (Impl.name j)) t.jobs in
@@ -1853,16 +2456,18 @@ let clean_main t =
   remove (t.root / "main.ml")
 
 let configure t =
-  info "%s %s" (blue_s "Using configuration:") (t.root / "config.ml");
+  info "%s %s" (blue_s "Using configuration:") (get_config_file ());
   info "%d job%s [%s]"
     (List.length t.jobs)
     (if List.length t.jobs = 1 then "" else "s")
     (String.concat ", " (List.map Impl.functor_name t.jobs));
   in_dir t.root (fun () ->
-      if !manage_opam then configure_opam t;
+      if !manage_opam_packages_ then configure_opam t;
       configure_myocamlbuild_ml t;
       configure_makefile t;
       configure_main_xl t;
+      configure_main_xe t;
+      configure_main_libvirt_xml t;
       configure_main t
     )
 
@@ -1872,24 +2477,20 @@ let make () =
   | _ -> "make"
 
 let build t =
-  info "Build: %s" (blue_s (t.root / "config.ml"));
+  info "Build: %s" (blue_s (get_config_file ()));
   in_dir t.root (fun () ->
       command "%s build" (make ())
     )
 
-let run t =
-  info "Run: %s" (blue_s (t.root / "config.ml"));
-  in_dir t.root (fun () ->
-      command "%s run" (make ())
-    )
-
 let clean t =
-  info "Clean: %s" (blue_s (t.root / "config.ml"));
+  info "Clean: %s" (blue_s (get_config_file ()));
   in_dir t.root (fun () ->
-      if !manage_opam then clean_opam t;
+      if !manage_opam_packages_ then clean_opam t;
       clean_myocamlbuild_ml t;
       clean_makefile t;
       clean_main_xl t;
+      clean_main_xe t;
+      clean_main_libvirt_xml t;
       clean_main t;
       command "rm -rf %s/_build" t.root;
       command "rm -rf log %s/main.native.o %s/main.native %s/mir-%s %s/*~"
@@ -1927,13 +2528,14 @@ let scan_conf = function
       info "%s %s" (blue_s "Using scanned config file:") f;
       realpath f
     | _   -> error "There is more than one config.ml in the current working directory.\n\
-                    Please specify one explicitly on the command-line."
+                    Please specify one explictly on the command-line."
 
 let load file =
   reset ();
   let file = scan_conf file in
   let root = realpath (Filename.dirname file) in
   let file = root / Filename.basename file in
+  info "%s %s" (blue_s "Compiling for target:") (string_of_mode !mode);
   set_config_file file;
   compile_and_dynlink file;
   let t = registered () in

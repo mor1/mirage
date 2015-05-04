@@ -33,7 +33,7 @@ val (@->): 'a typ -> 'b typ -> ('a -> 'b) typ
     type. This corresponds to prepending a parameter to the list of
     functor parameters. For example,
 
-    {| kv_ro @-> ip @-> kv_ro |}
+    {[ kv_ro @-> ip @-> kv_ro ]}
 
     describes a functor type that accepts two arguments -- a kv_ro and
     an ip device -- and returns a kv_ro.
@@ -224,24 +224,35 @@ val etif: network impl -> ethernet impl
 
 
 
-(** {2 IPV4 configuration. *)
+(** {2 IP configuration} *)
 
-(** Implementations of the [V1.IPV4] signature. *)
+(** Implementations of the [V1.IP] signature. *)
 
-type ipv4
+type v4
+type v6
+
+type 'a ip
+type ipv4 = v4 ip
+type ipv6 = v6 ip
 (** Abstract type for IP configurations. *)
 
 val ipv4: ipv4 typ
 (** The [V1.IPV4] module signature. *)
 
-type ipv4_config = {
-  address: Ipaddr.V4.t;
-  netmask: Ipaddr.V4.t;
-  gateways: Ipaddr.V4.t list;
+val ipv6: ipv6 typ
+(** The [V1.IPV6] module signature. *)
+
+type ('ipaddr, 'prefix) ip_config = {
+  address: 'ipaddr;
+  netmask: 'prefix;
+  gateways: 'ipaddr list;
 }
+(** Types for IP manual configuration. *)
+
+type ipv4_config = (Ipaddr.V4.t, Ipaddr.V4.t) ip_config
 (** Types for IPv4 manual configuration. *)
 
-val create_ipv4: network impl -> ipv4_config -> ipv4 impl
+val create_ipv4: ?clock:clock impl -> ?time:time impl -> network impl -> ipv4_config -> ipv4 impl
 (** Use an IPv4 address. *)
 
 val default_ipv4: network impl -> ipv4 impl
@@ -250,30 +261,44 @@ val default_ipv4: network impl -> ipv4 impl
     - netmask: 255.255.255.0
     - gateways: [10.0.0.1] *)
 
+type ipv6_config = (Ipaddr.V6.t, Ipaddr.V6.Prefix.t list) ip_config
+(** Types for IPv6 manual configuration. *)
+
+val create_ipv6: ?time:time impl -> ?clock:clock impl -> network impl -> ipv6_config -> ipv6 impl
+(** Use an IPv6 address. *)
 
 
-(** {UDPV4 configuration} *)
 
-(** Implementation of the [V1.UDPV4] signature. *)
+(** {UDP configuration} *)
 
-type udpv4
+(** Implementation of the [V1.UDP] signature. *)
+
+type 'a udp
+type udpv4 = v4 udp
+type udpv6 = v6 udp
+val udp: 'a udp typ
 val udpv4: udpv4 typ
-val direct_udpv4: ipv4 impl -> udpv4 impl
+val udpv6: udpv6 typ
+val direct_udp: 'a ip impl -> 'a udp impl
 val socket_udpv4: Ipaddr.V4.t option -> udpv4 impl
 
 
 
-(** {TCPV4 configuration} *)
+(** {TCP configuration} *)
 
-(** Implementation of the [V1.TCPV4] signature. *)
+(** Implementation of the [V1.TCP] signature. *)
 
-type tcpv4
+type 'a tcp
+type tcpv4 = v4 tcp
+type tcpv6 = v6 tcp
+val tcp: 'a tcp typ
 val tcpv4: tcpv4 typ
-val direct_tcpv4:
+val tcpv6: tcpv6 typ
+val direct_tcp:
   ?clock:clock impl ->
   ?random:random impl ->
   ?time:time impl ->
-  ipv4 impl -> tcpv4 impl
+  'a ip impl -> 'a tcp impl
 val socket_tcpv4: Ipaddr.V4.t option -> tcpv4 impl
 
 
@@ -306,22 +331,55 @@ val direct_stackv4_with_dhcp:
 
 val socket_stackv4: console impl ->  Ipaddr.V4.t list -> stackv4 impl
 
+(** {Resolver configuration} *)
 
-(** {Channel configuration} *)
+type resolver
+val resolver: resolver typ
+val resolver_dns : ?ns:Ipaddr.V4.t -> ?ns_port:int -> stackv4 impl -> resolver impl
+val resolver_unix_system : resolver impl
 
-(** Implementation of the [V1.CHANNEL] signature. *)
+(** {Vchan configuration} *)
+type vchan
+val vchan: vchan typ
+val vchan_localhost : ?uuid:string -> unit -> vchan impl
+val vchan_xen : ?uuid:string -> unit -> vchan impl
+val vchan_default : ?uuid:string -> unit -> vchan impl
 
-type channel
-val channel: channel typ
-val channel_over_tcpv4: tcpv4 impl -> channel impl
+(** {TLS configuration} *)
+type conduit_tls
+val tls_over_conduit : entropy impl -> conduit_tls impl
 
+(** {Conduit configuration} *)
+
+type conduit
+val conduit: conduit typ
+val conduit_direct : ?vchan:vchan impl -> ?tls:conduit_tls impl -> stackv4 impl -> conduit impl
+
+type conduit_client = [
+  | `TCP of Ipaddr.t * int
+  | `Vchan of string list
+]
+
+type conduit_server = [
+  | `TCP of [ `Port of int ]
+  | `Vchan of string list
+]
 
 (** {HTTP configuration} *)
 
 type http
 val http: http typ
-val http_server_of_channel: channel impl -> http impl
-val http_server: int -> stackv4 impl -> http impl
+val http_server: conduit_server -> conduit impl -> http impl
+
+
+(** {2 Tracing} *)
+
+type tracing
+
+val mprof_trace : size:int -> unit -> tracing
+(** Use mirage-profile to trace the unikernel.
+   On Unix, this creates and mmaps a file called "trace.ctf".
+   On Xen, it shares the trace buffer with dom0. *)
 
 
 (** {2 Jobs} *)
@@ -332,14 +390,16 @@ type job
 val job: job typ
 (** Reprensention of [JOB]. *)
 
-val register: string -> job impl list -> unit
+val register: ?tracing:tracing -> string -> job impl list -> unit
 (** [register name jobs] registers the application named by [name]
-    which will executes the given [jobs]. *)
+    which will executes the given [jobs].
+    @param tracing enables tracing if present (see {!mprof_trace}). *)
 
 type t = {
   name: string;
   root: string;
   jobs: job impl list;
+  tracing: tracing option;
 }
 (** Type for values representing a project description. *)
 
@@ -352,6 +412,7 @@ val load: string option -> t
 type mode = [
   | `Unix
   | `Xen
+  | `MacOSX
 ]
 (** Configuration mode. *)
 
@@ -391,6 +452,9 @@ val manage_opam_packages: bool -> unit
 (** Tell Irminsule to manage the OPAM configuration
     (ie. install/remove missing packages). *)
 
+val no_opam_version_check: bool -> unit
+(** Bypass the check of opam's version. *)
+
 val add_to_opam_packages: string list -> unit
 (** Add some base OPAM package to install *)
 
@@ -412,9 +476,6 @@ val clean: t -> unit
 
 val build: t -> unit
 (** Call [make build] in the right directory. *)
-
-val run: t -> unit
-(** call [make run] in the right directory. *)
 
 (** {2 Extensions} *)
 
@@ -495,17 +556,16 @@ module Network: CONFIGURABLE
 module Ethif: CONFIGURABLE
 
 module IPV4: CONFIGURABLE
+module IPV6: CONFIGURABLE
 
-module UDPV4_direct: CONFIGURABLE
+module UDP_direct: functor (V : sig type t end) -> CONFIGURABLE
 module UDPV4_socket: CONFIGURABLE
 
-module TCPV4_direct: CONFIGURABLE
+module TCP_direct: functor (V : sig type t end) -> CONFIGURABLE
 module TCPV4_socket: CONFIGURABLE
 
 module STACKV4_direct: CONFIGURABLE
 module STACKV4_socket: CONFIGURABLE
-
-module Channel_over_TCPV4: CONFIGURABLE
 
 module HTTP: CONFIGURABLE
 

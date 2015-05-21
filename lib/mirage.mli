@@ -95,17 +95,6 @@ val default_random: random impl
 (** Passthrough to the OCaml Random generator. *)
 
 
-(** {2 Entropy} *)
-
-type entropy
-(** Abstract type for entropy sources. *)
-
-val entropy: entropy typ
-(** The [V1.ENTROPY] module signature. *)
-
-val default_entropy: entropy impl
-(** Pick the strongest entropy source available. *)
-
 (** {2 Consoles} *)
 
 (** Implementations of the [V1.CONSOLE] signature. *)
@@ -347,7 +336,6 @@ val vchan_default : ?uuid:string -> unit -> vchan impl
 
 (** {TLS configuration} *)
 type conduit_tls
-val tls_over_conduit : entropy impl -> conduit_tls impl
 
 (** {Conduit configuration} *)
 
@@ -454,6 +442,9 @@ val manage_opam_packages: bool -> unit
 
 val no_opam_version_check: bool -> unit
 (** Bypass the check of opam's version. *)
+
+val no_depext: bool -> unit
+(** Skip installation of external dependencies. *)
 
 val add_to_opam_packages: string list -> unit
 (** Add some base OPAM package to install *)
